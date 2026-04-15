@@ -50,7 +50,7 @@ Share this repo URL with Claude Code — it will read the instructions below and
 >    - Linux x86_64: `claude-lifeline-x86_64-unknown-linux-musl`
 >    - Linux ARM64: `claude-lifeline-aarch64-unknown-linux-musl`
 >    - Windows x86_64: `claude-lifeline-x86_64-pc-windows-msvc.exe`
-> 2. Save the binary to `~/.claude/bin/claude-lifeline` (Windows: `%USERPROFILE%\.claude\bin\claude-lifeline.exe`), create the directory if it doesn't exist, and make it executable (`chmod +x`)
+> 2. Save the binary to `~/.claude/bin/claude-lifeline` (Windows: `%USERPROFILE%\.claude\bin\claude-lifeline.exe`), create the directory if it doesn't exist, make it executable (`chmod +x`), and on macOS run `xattr -d com.apple.quarantine ~/.claude/bin/claude-lifeline` to bypass Gatekeeper
 > 3. Edit `~/.claude/settings.json` — add or merge the following key into the existing JSON:
 >    ```json
 >    "statusLine": { "type": "command", "command": "~/.claude/bin/claude-lifeline" }

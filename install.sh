@@ -135,6 +135,11 @@ mkdir -p "$INSTALL_DIR"
 curl -fsSL "$URL" -o "$INSTALL_DIR/$BIN_NAME"
 chmod +x "$INSTALL_DIR/$BIN_NAME"
 
+# macOS: 移除 Gatekeeper 隔离标记（未签名二进制）
+if [ "$OS" = "darwin" ]; then
+  xattr -d com.apple.quarantine "$INSTALL_DIR/$BIN_NAME" 2>/dev/null || true
+fi
+
 echo "Installed to $INSTALL_DIR/$BIN_NAME"
 
 # ── 配置 settings.json ──
