@@ -156,7 +156,7 @@ pub fn render(ctx: &RenderContext) {
 
 // ── 私有辅助函数 ──
 
-/// 格式化 quota 后缀：(重置时间 方向箭头 →耗尽时间)
+/// 格式化 quota 后缀：(重置时间 ETA 耗尽预估)
 fn format_quota_suffix(
     resets_at: &Option<chrono::DateTime<chrono::Utc>>,
     pace: &Option<crate::usage::PaceInfo>,
@@ -166,13 +166,7 @@ fn format_quota_suffix(
         .map(crate::usage::format_reset_time)
         .unwrap_or_default();
 
-    let direction_str = pace.as_ref().map(|p| match p.direction {
-        crate::usage::PaceDirection::Over => format!("{RED}↑{RESET}"),
-        crate::usage::PaceDirection::Under => format!("{GREEN}↓{RESET}"),
-        crate::usage::PaceDirection::Normal => String::new(),
-    }).unwrap_or_default();
-
-    // 耗尽时间预估（当天显示 HH:MM，跨天显示 M/D HH:MM）
+    // 耗尽时间预估（ETA 前缀标明是预测值，非实际到期时间）
     let depletion_str = pace.as_ref()
         .and_then(|p| p.depletion_eta.as_ref())
         .map(|eta| {
@@ -184,11 +178,11 @@ fn format_quota_suffix(
             } else {
                 local.format("%-m/%-d %H:%M").to_string()
             };
-            format!(" {RED}→{fmt}{RESET}")
+            format!(" {RED}ETA {fmt}{RESET}")
         })
         .unwrap_or_default();
 
-    if reset_str.is_empty() && direction_str.is_empty() && depletion_str.is_empty() {
+    if reset_str.is_empty() && depletion_str.is_empty() {
         return String::new();
     }
 
@@ -196,13 +190,10 @@ fn format_quota_suffix(
     if !reset_str.is_empty() {
         inner.push_str(&format!("{DIM}{reset_str}{RESET}"));
     }
-    if !direction_str.is_empty() {
+    if !depletion_str.is_empty() {
         if !inner.is_empty() {
             inner.push(' ');
         }
-        inner.push_str(&direction_str);
-    }
-    if !depletion_str.is_empty() {
         inner.push_str(&depletion_str);
     }
     format!("{DIM}({RESET}{inner}{DIM}){RESET}")

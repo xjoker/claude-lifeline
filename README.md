@@ -7,7 +7,7 @@ A fast Rust status line for [Claude Code](https://docs.anthropic.com/en/docs/cla
 ```
 ─────────────────────────────────────────
 [Sonnet 4.6 | Max]  my-project  git:(main* ↑2)  1h 23m
-ctx █████░░░░░ 53%  │  5h ██|██░░░░░░ 35%/p22.50%(3h 55m)  │  7d ██|█░░░░░░░ 21%!/p12.43%(6d 3h ↑ →4/19 01:22)
+ctx █████░░░░░ 53%  │  5h ██|██░░░░░░ 35%/p22.50%(3h 55m)  │  7d ██|█░░░░░░░ 21%!/p12.43%(6d 3h ETA 4/19 01:22)
 ```
 
 **Line 1** — model, plan, project, git branch, session duration
@@ -31,20 +31,16 @@ ctx █████░░░░░ 53%  │  5h ██|██░░░░░░ 
 - **Over-pace alert** — when usage exceeds pace by more than 5%:
   - Bar color turns **yellow**
   - Percentage suffixed with `!`
-  - Red `↑` arrow — consuming faster than sustainable, quota may deplete before window resets
-- **Under-pace indicator** — when usage is below pace by more than 5%:
-  - Green `↓` arrow — consuming slower than average, quota headroom is healthy
-- **No arrow** — usage is within ±5% of pace, on track for normal consumption
 - **Reset countdown** — time until window resets: `3h 55m`, `6d 3h`
-- **Depletion arrow** `→` — red, shows the estimated local time when quota will hit 100% at current burn rate
 
 ### Depletion ETA
 
-When consuming faster than sustainable (usage > pace + 5%), estimates when quota will hit 100% at current burn rate:
+When consuming faster than sustainable (usage > pace + 5%), shows **`ETA`** followed by the **predicted** local time when quota will hit 100% at current burn rate:
 
-- Same day: `→16:30` (local time)
-- Different day: `→4/19 01:22` (local time, M/D format)
+- Same day: `ETA 16:30`
+- Different day: `ETA 4/19 01:22`
 - Only shown when depletion would occur **before** the window resets
+- **This is a prediction, not the actual reset/expiration time.** The actual reset countdown is shown separately (e.g., `6d 3h`)
 
 ### Color Thresholds (Quotas)
 
