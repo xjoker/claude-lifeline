@@ -8,6 +8,8 @@ use tokio::time::timeout;
 pub struct GitInfo {
     pub branch: Option<String>,
     pub is_dirty: bool,
+    pub ahead: u32,
+    pub behind: u32,
 }
 
 /// 异步获取 git branch + dirty 状态，500ms 超时后返回默认值
@@ -28,9 +30,17 @@ pub async fn get_git_info(cwd: &str) -> GitInfo {
         .stderr(std::process::Stdio::null())
         .output();
 
-    let (branch_res, dirty_res) = tokio::join!(
+    let ab_fut = Command::new("git")
+        .args(["rev-list", "--count", "--left-right", "@{upstream}...HEAD"])
+        .current_dir(cwd)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output();
+
+    let (branch_res, dirty_res, ab_res) = tokio::join!(
         timeout(deadline, branch_fut),
         timeout(deadline, dirty_fut),
+        timeout(deadline, ab_fut),
     );
 
     let branch = branch_res
@@ -49,5 +59,19 @@ pub async fn get_git_info(cwd: &str) -> GitInfo {
         .map(|o| !o.stdout.is_empty())
         .unwrap_or(false);
 
-    GitInfo { branch, is_dirty }
+    // ahead/behind: output format "BEHIND\tAHEAD\n"
+    let (ahead, behind) = ab_res
+        .ok()
+        .and_then(|r| r.ok())
+        .filter(|o| o.status.success())
+        .and_then(|o| {
+            let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            let mut parts = s.split('\t');
+            let b = parts.next()?.parse::<u32>().ok()?;
+            let a = parts.next()?.parse::<u32>().ok()?;
+            Some((a, b))
+        })
+        .unwrap_or((0, 0));
+
+    GitInfo { branch, is_dirty, ahead, behind }
 }

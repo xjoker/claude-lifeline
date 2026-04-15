@@ -26,6 +26,8 @@ pub struct PaceInfo {
     pub pace_percent: f64,
     /// 方向指示：>0 超速, <0 低速, 0 正常
     pub direction: PaceDirection,
+    /// 按当前消耗速率预估的耗尽时间（仅当耗尽时间早于窗口重置时有值）
+    pub depletion_eta: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -153,17 +155,36 @@ pub fn calc_pace(window: &WindowUsage, window_secs: i64) -> Option<PaceInfo> {
 
     let pace_percent = ((elapsed_secs as f64 / window_secs as f64) * 100.0).clamp(0.0, 100.0);
 
-    let direction = if window.used_percent > pace_percent + 10.0 {
+    let direction = if window.used_percent > pace_percent + 5.0 {
         PaceDirection::Over
-    } else if window.used_percent < pace_percent - 10.0 {
+    } else if window.used_percent < pace_percent - 5.0 {
         PaceDirection::Under
     } else {
         PaceDirection::Normal
     };
 
+    // 耗尽时间预估：用量必须超出配速 5% 以上才有意义
+    // 避免 on-pace 时 eta ≈ resets_at 导致的误报
+    let depletion_eta = if window.used_percent > 5.0
+        && elapsed_secs > 60
+        && window.used_percent > pace_percent + 5.0
+    {
+        let burn_rate = window.used_percent / elapsed_secs as f64;
+        if burn_rate > 0.0 {
+            let secs_to_100 = ((100.0 - window.used_percent) / burn_rate) as i64;
+            let eta = now + chrono::Duration::seconds(secs_to_100);
+            if eta < *resets_at { Some(eta) } else { None }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     Some(PaceInfo {
         pace_percent,
         direction,
+        depletion_eta,
     })
 }
 

@@ -21,6 +21,7 @@ pub struct RenderContext {
     pub stdin: StdinData,
     pub git: GitInfo,
     pub usage: UsageData,
+    pub session_duration: Option<std::time::Duration>,
 }
 
 // ── 公共函数 ──
@@ -56,25 +57,58 @@ pub fn render(ctx: &RenderContext) {
         .unwrap_or("unknown");
     let project_display = format!("{YELLOW}{project_name}{RESET}");
 
-    // git 部分 — git:() 品红，分支名青色
+    // git 部分 — git:() 品红，分支名青色，ahead/behind
     let git_section = if let Some(branch) = &ctx.git.branch {
         let dirty = if ctx.git.is_dirty { "*" } else { "" };
-        format!(" {MAGENTA}git:({RESET}{CYAN}{branch}{dirty}{RESET}{MAGENTA}){RESET}")
+        let mut ab = String::new();
+        if ctx.git.ahead > 0 {
+            ab.push_str(&format!(" {GREEN}↑{}{RESET}", ctx.git.ahead));
+        }
+        if ctx.git.behind > 0 {
+            ab.push_str(&format!(" {RED}↓{}{RESET}", ctx.git.behind));
+        }
+        format!(" {MAGENTA}git:({RESET}{CYAN}{branch}{dirty}{RESET}{MAGENTA}){RESET}{ab}")
     } else {
         String::new()
     };
 
-    let line1 = format!("{model_section} {project_display}{git_section}");
+    // 会话时长 — dim 显示
+    let session_section = ctx.session_duration.map(|d| {
+        let total_secs = d.as_secs();
+        let formatted = if total_secs < 60 {
+            "0m".to_string()
+        } else if total_secs < 3600 {
+            format!("{}m", total_secs / 60)
+        } else {
+            format!("{}h {}m", total_secs / 3600, (total_secs % 3600) / 60)
+        };
+        format!(" {DIM}{formatted}{RESET}")
+    }).unwrap_or_default();
+
+    let line1 = format!("{model_section} {project_display}{git_section}{session_section}");
 
     // ── 行2 ──
     let mut segments: Vec<String> = Vec::new();
 
-    // Segment 1: Context
+    // Segment 1: Context（>= 85% 时显示 token 明细）
     let ctx_pct = crate::input::get_context_percent(&ctx.stdin);
     let ctx_color = get_context_color(ctx_pct);
     let ctx_bar = render_bar_with_pace(ctx_pct, None, 10, ctx_color);
+    let token_detail = if ctx_pct >= 85.0 {
+        ctx.stdin.context_window.as_ref()
+            .and_then(|cw| cw.current_usage.as_ref())
+            .map(|u| {
+                let input = u.input_tokens.unwrap_or(0);
+                let cache = u.cache_creation_input_tokens.unwrap_or(0)
+                    + u.cache_read_input_tokens.unwrap_or(0);
+                format!(" {DIM}(in:{} c:{}){RESET}", format_tokens(input), format_tokens(cache))
+            })
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
     segments.push(format!(
-        "{DIM}ctx{RESET} {ctx_bar} {ctx_color}{:.0}%{RESET}",
+        "{DIM}ctx{RESET} {ctx_bar} {ctx_color}{:.0}%{RESET}{token_detail}",
         ctx_pct
     ));
 
@@ -82,16 +116,15 @@ pub fn render(ctx: &RenderContext) {
     if let Some(five_hour) = &ctx.usage.five_hour {
         let pace = crate::usage::calc_pace(five_hour, crate::usage::WINDOW_5H_SECS);
         let over = pace.as_ref().is_some_and(|p| p.direction == crate::usage::PaceDirection::Over);
-        // 超速时进度条变黄
         let color = get_quota_color_with_pace(five_hour.used_percent, over);
         let pace_pct = pace.as_ref().map(|p| p.pace_percent);
         let bar = render_bar_with_pace(five_hour.used_percent, pace_pct, 10, color);
         let suffix = format_quota_suffix(&five_hour.resets_at, &pace);
-        // 超速时加 !
         let alert = if over { "!" } else { "" };
+        let pace_label = format_pace_label(&pace);
 
         segments.push(format!(
-            "{DIM}5h{RESET} {bar} {color}{:.0}%{alert}{RESET}{suffix}",
+            "{DIM}5h{RESET} {bar} {color}{:.0}%{alert}{RESET}{pace_label}{suffix}",
             five_hour.used_percent
         ));
     }
@@ -105,9 +138,10 @@ pub fn render(ctx: &RenderContext) {
         let bar = render_bar_with_pace(seven_day.used_percent, pace_pct, 10, color);
         let suffix = format_quota_suffix(&seven_day.resets_at, &pace);
         let alert = if over { "!" } else { "" };
+        let pace_label = format_pace_label(&pace);
 
         segments.push(format!(
-            "{DIM}7d{RESET} {bar} {color}{:.0}%{alert}{RESET}{suffix}",
+            "{DIM}7d{RESET} {bar} {color}{:.0}%{alert}{RESET}{pace_label}{suffix}",
             seven_day.used_percent
         ));
     }
@@ -115,13 +149,14 @@ pub fn render(ctx: &RenderContext) {
     let separator = format!("{DIM} │ {RESET}");
     let line2 = segments.join(&separator);
 
+    println!("{DIM}─────────────────────────────────────────{RESET}");
     println!("{line1}");
     println!("{line2}");
 }
 
 // ── 私有辅助函数 ──
 
-/// 格式化 quota 后缀：(重置时间 方向箭头)
+/// 格式化 quota 后缀：(重置时间 方向箭头 →耗尽时间)
 fn format_quota_suffix(
     resets_at: &Option<chrono::DateTime<chrono::Utc>>,
     pace: &Option<crate::usage::PaceInfo>,
@@ -131,14 +166,29 @@ fn format_quota_suffix(
         .map(crate::usage::format_reset_time)
         .unwrap_or_default();
 
-    // 重置时间和方向箭头都没有时，不输出后缀
     let direction_str = pace.as_ref().map(|p| match p.direction {
         crate::usage::PaceDirection::Over => format!("{RED}↑{RESET}"),
         crate::usage::PaceDirection::Under => format!("{GREEN}↓{RESET}"),
         crate::usage::PaceDirection::Normal => String::new(),
     }).unwrap_or_default();
 
-    if reset_str.is_empty() && direction_str.is_empty() {
+    // 耗尽时间预估（当天显示 HH:MM，跨天显示 M/D HH:MM）
+    let depletion_str = pace.as_ref()
+        .and_then(|p| p.depletion_eta.as_ref())
+        .map(|eta| {
+            let local: chrono::DateTime<chrono::Local> = eta.with_timezone(&chrono::Local);
+            let today = chrono::Local::now().date_naive();
+            let eta_date = local.date_naive();
+            let fmt = if eta_date == today {
+                local.format("%H:%M").to_string()
+            } else {
+                local.format("%-m/%-d %H:%M").to_string()
+            };
+            format!(" {RED}→{fmt}{RESET}")
+        })
+        .unwrap_or_default();
+
+    if reset_str.is_empty() && direction_str.is_empty() && depletion_str.is_empty() {
         return String::new();
     }
 
@@ -152,32 +202,56 @@ fn format_quota_suffix(
         }
         inner.push_str(&direction_str);
     }
+    if !depletion_str.is_empty() {
+        inner.push_str(&depletion_str);
+    }
     format!("{DIM}({RESET}{inner}{DIM}){RESET}")
 }
 
-/// 渲染带配速标记的进度条
+/// 格式化配速位置标签：/p15.23%
+fn format_pace_label(pace: &Option<crate::usage::PaceInfo>) -> String {
+    pace.as_ref()
+        .map(|p| format!("{DIM}/p{:.2}%{RESET}", p.pace_percent))
+        .unwrap_or_default()
+}
+
+/// 格式化 token 数量（K/M 缩写）
+fn format_tokens(count: u64) -> String {
+    if count >= 1_000_000 {
+        format!("{:.1}M", count as f64 / 1_000_000.0)
+    } else if count >= 1_000 {
+        format!("{:.0}k", count as f64 / 1_000.0)
+    } else {
+        format!("{count}")
+    }
+}
+
+/// 渲染带配速标记的进度条（配速线插入而非替换，不吃掉填充块）
 fn render_bar_with_pace(used_pct: f64, pace_pct: Option<f64>, width: usize, color: &str) -> String {
     let used_pos = ((used_pct / 100.0) * width as f64).round() as usize;
     let used_pos = used_pos.min(width);
 
     let pace_pos = pace_pct.map(|p| {
         let pos = ((p / 100.0) * width as f64).round() as usize;
-        pos.min(width.saturating_sub(1))
+        pos.min(width)
     });
 
     let mut result = String::new();
 
     for i in 0..width {
+        // 在该位置前插入配速线
         if Some(i) == pace_pos {
-            // Pace marker always rendered as bold white |
             result.push_str(&format!("{BOLD_WHITE}|{RESET}"));
-        } else if i < used_pos {
-            // Filled block in color
+        }
+        if i < used_pos {
             result.push_str(&format!("{color}█{RESET}"));
         } else {
-            // Empty block dim
             result.push_str(&format!("{DIM}░{RESET}"));
         }
+    }
+    // 配速线在末尾
+    if pace_pos == Some(width) {
+        result.push_str(&format!("{BOLD_WHITE}|{RESET}"));
     }
 
     result
