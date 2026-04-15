@@ -1,81 +1,231 @@
 # claude-lifeline
 
-A fast Rust status line for [Claude Code](https://docs.anthropic.com/en/docs/claude-code), replacing the default Node.js status bar with a feature-rich, sub-50ms native binary.
+A fast Rust status line for [Claude Code](https://docs.anthropic.com/en/docs/claude-code), replacing the default status bar with a feature-rich, sub-50ms native binary.
+
+**[中文文档](docs/README_CN.md)**
 
 ## Preview
 
 ```
 ─────────────────────────────────────────
-[Sonnet 4.6 | Max]  my-project  git:(main* ↑2)  1h 23m
-ctx █████░░░░░ 53%  │  5h ██|██░░░░░░ 35%/p22.50%(3h 55m)  │  7d ██|█░░░░░░░ 21%!/p12.43%(6d 3h ETA 4/19 01:22)
+[Opus 4.6 | Max]  my-project  git:(main* ↑2)  1h 23m
+ctx █████░░░░░ 53%  │  5h ████░░|░░░░ 34%(1h 23m)  │  7d ██|█░░░░░░░ 22%!/p14.05%(6d 0h ETA 4/19 08:18 wait 13h)
 ```
 
-**Line 1** — model, plan, project, git branch, session duration
+### Line 1 — Session Info
 
-**Line 2** — context window, 5-hour quota, 7-day quota with pace markers
+```
+[Opus 4.6 | Max]  my-project  git:(main* ↑2)  1h 23m
+ ^^^^^^^^^^^       ^^^^^^^^^^      ^^^^^^^^^   ^^^^^^
+ Model & Plan      Project name   Git status   Session duration
+```
+
+### Line 2 — Resource Usage
+
+```
+ctx █████░░░░░ 53%  │  5h ████░░|░░░░ 34%(1h 23m)  │  7d ██|█░░░░░░░ 22%!/p14.05%(...)
+^^^                    ^^                               ^^
+Context window         5-hour quota                     7-day quota
+```
 
 ## Features
 
-### Context Window
+### Context Window (`ctx`)
 
-- 10-block progress bar with color thresholds:
-  - **Green** `< 70%` — comfortable
-  - **Yellow** `70–85%` — getting close
-  - **Red** `≥ 85%` — approaching limit, shows token breakdown `(in:120k c:65k)`
+Displays context window usage as a 10-block progress bar.
 
-### Rate Limit Quotas (5h / 7d)
+| Color | Threshold | Meaning |
+|-------|-----------|---------|
+| Green | `< 70%` | Comfortable headroom |
+| Yellow | `70–85%` | Getting close |
+| Red | `≥ 85%` | Approaching limit |
 
-- **Progress bar** — filled blocks `█` showing actual usage
-- **Pace marker** `|` — bold white line inserted at the expected usage position based on elapsed time in the window, does not replace filled blocks
-- **Pace percentage** `/p22.50%` — the exact pace position (2 decimal places), indicating how much time has elapsed relative to the window
-- **Over-pace alert** — when usage exceeds pace by more than 5%:
-  - Bar color turns **yellow**
-  - Percentage suffixed with `!`
-- **Reset countdown** — time until window resets: `3h 55m`, `6d 3h`
+When context reaches **≥ 85%**, a token breakdown appears:
 
-### Depletion ETA
+```
+ctx █████████░ 92% (in:120k c:65k)
+                    ^^^^^^  ^^^^^
+                    Input    Cache (creation + read)
+```
 
-When consuming faster than sustainable (usage > pace + 5%), shows **`ETA`** followed by the **predicted** local time when quota will hit 100% at current burn rate:
+Token counts are formatted as `k` (thousands) or `M` (millions).
 
-- Same day: `ETA 16:30`
-- Different day: `ETA 4/19 01:22`
-- Only shown when depletion would occur **before** the window resets
-- **This is a prediction, not the actual reset/expiration time.** The actual reset countdown is shown separately (e.g., `6d 3h`)
+### Rate Limit Quotas (`5h` / `7d`)
 
-### Color Thresholds (Quotas)
+Displays usage for the 5-hour and 7-day rate limit windows. Each segment contains:
+
+#### Progress Bar
+
+```
+██|█░░░░░░░
+^^|^
+Filled blocks (actual usage)
+  |
+  Pace marker (expected position based on elapsed time)
+```
+
+- **`█`** — filled blocks in quota color, count reflects actual usage percentage
+- **`|`** — pace marker (bold white), inserted at the position representing how much time has elapsed in the window. It does **not** replace filled blocks
+- **`░`** — empty blocks (dim)
+
+#### Percentage & Alerts
+
+```
+22%!/p14.05%
+^^^  ^^^^^^^
+Usage  Pace position (only shown when over-pace)
+   ^
+   ! = over-pace alert
+```
+
+- **Usage `%`** — current quota consumption
+- **`!`** — appended when usage exceeds pace by more than 5% (over-pace)
+- **`/p14.05%`** — pace position, i.e., how much time has elapsed relative to the total window. Only displayed when over-pace, to show the gap between usage and expected position
+
+#### Suffix: Reset, ETA, Recovery
+
+```
+(6d 0h ETA 4/19 08:18 wait 13h)
+ ^^^^^  ^^^^^^^^^^^^^^  ^^^^^^^^
+ Reset   Depletion ETA   Recovery time
+```
+
+- **Reset countdown** — time until the window resets: `59m`, `3h 55m`, `6d 0h`
+- **`ETA`** — **predicted** local time when quota will hit 100% at current burn rate. **This is NOT the actual reset/expiration time.** Only shown when over-pace and depletion would occur before window reset
+  - Same day: `ETA 16:30`
+  - Cross-day: `ETA 4/19 01:22`
+- **`wait`** — how long you need to pause for your pace to catch up to current usage level. Only shown when over-pace
+  - Example: `wait 59m` means "stop for ~59 minutes and your consumption will be back on track"
+
+#### Color Thresholds
 
 | Condition | Color |
 |-----------|-------|
 | Usage `< 75%`, on pace | Blue |
-| Usage `75–90%` or over-pace | Yellow |
+| Usage `75–90%` or over-pace (`!`) | Yellow |
 | Usage `≥ 90%` | Red |
+
+#### Complete Examples
+
+**Normal — within pace**
+
+```
+5h ██░░░░|░░░░ 18%(3h 55m)
+   ^^^^^^       ^^^ ^^^^^^^
+   │             │   └─ Window resets in 3h 55m (you get a fresh quota then)
+   │             └─ 18% of 5h quota consumed
+   └─ 2 filled blocks = 18% used, pace marker | at position 6 = ~60% of window elapsed
+      You're using slower than expected — no alerts
+```
+
+**Over-pace — burning too fast**
+
+```
+5h █████░|░░░░ 52%!/p32.15%(2h 10m ETA 16:30 wait 45m)
+   ^^^^^^       ^^^  ^^^^^^^ ^^^^^  ^^^^^^^^  ^^^^^^^^
+   │             │    │       │      │         └─ Stop for ~45min to get back on pace
+   │             │    │       │      └─ At this burn rate, quota hits 100% by 16:30 today
+   │             │    │       └─ Window resets in 2h 10m
+   │             │    └─ Only 32.15% of the 5h window has elapsed (pace position)
+   │             └─ 52% used + ! = over-pace alert (52% usage vs 32% pace, gap > 5%)
+   └─ 5 filled blocks = 52% used, pace marker | at position 3 = ~32% time elapsed
+      Usage is ahead of the pace marker — you're consuming faster than the window allows
+```
+
+**Critical — approaching limit**
+
+```
+5h █████████|░ 93%!/p85.00%(25m ETA 15:05 wait 12m)
+   ^^^^^^^^^^      ^^^^^^^^  ^^^  ^^^^^^^  ^^^^^^^^
+   │                │        │    │        └─ Pause ~12min to align with pace
+   │                │        │    └─ At this rate, quota depletes by 15:05
+   │                │        └─ Resets in 25 minutes
+   │                └─ 85% of the window has passed
+   └─ 9 filled blocks = 93%, pace marker near end — almost out of time AND quota
+```
+
+**7-day window — cross-day ETA**
+
+```
+7d ██|█░░░░░░░ 22%!/p14.05%(6d 0h ETA 4/19 08:18 wait 13h)
+   ^^^          ^^^  ^^^^^^^ ^^^^  ^^^^^^^^^^^^^^  ^^^^^^^^
+   │             │    │       │     │               └─ Stop for ~13h to realign
+   │             │    │       │     └─ Projected depletion: April 19 at 08:18
+   │             │    │       └─ Window resets in 6 days 0 hours
+   │             │    └─ Only 14.05% of the 7-day window has elapsed
+   │             └─ 22% used + ! (22% vs 14%, gap > 5%)
+   └─ Pace marker | at position 1 (~14%), filled blocks reach position 2 (~22%)
+```
+
+> **Key concept**: The pace marker `|` represents "where you *should* be" based on elapsed time. If filled blocks `█` extend past `|`, you're ahead of pace (over-consuming). The further apart they are, the more aggressively you're burning quota.
 
 ### Git Status
 
-- **Branch name** with dirty flag `*`
-- **Ahead** `↑N` (green) — commits ahead of upstream
-- **Behind** `↓N` (red) — commits behind upstream
-- Graceful fallback when no upstream is configured
+```
+git:(main* ↑2 ↓1)
+     ^^^^^ ^^  ^^
+     Branch  Ahead  Behind
+      * = uncommitted changes
+```
+
+- **Branch name** — current branch
+- **`*`** — dirty flag, shown when there are uncommitted changes
+- **`↑N`** (green) — N commits ahead of upstream
+- **`↓N`** (red) — N commits behind upstream
+- When no upstream is configured, ahead/behind is silently omitted
 
 ### Session Duration
 
-- Calculated from transcript file creation time
-- Displayed as `15m`, `1h 23m` at end of line 1
+```
+1h 23m
+```
 
-### Data Sources (Priority)
+Calculated from the transcript file's creation time. Displayed at the end of line 1 in dim text.
+
+- `< 1 min` → `0m`
+- `< 1 hour` → `15m`
+- `≥ 1 hour` → `1h 23m`
+
+### Model & Plan
+
+```
+[Opus 4.6 | Max]
+```
+
+- **Model** — display name from Claude Code (e.g., `Sonnet 4.6`, `Opus 4.6`, `Haiku 4.5`)
+- **Plan** — subscription type from `~/.claude/.credentials.json` (Max, Pro, Team). Omitted if unavailable
+
+## Configuration
+
+Optional config file at `~/.claude/claude-lifeline/config.toml`. All options default to `true`.
+
+```toml
+[display]
+context = true     # Context window segment
+five_hour = true   # 5-hour quota segment
+seven_day = true   # 7-day quota segment
+separator = true   # Separator line above status bar
+```
+
+See [config.example.toml](config.example.toml) for reference.
+
+## Data Sources
+
+Rate limit data is resolved in priority order:
 
 | Priority | Source | Notes |
 |----------|--------|-------|
-| 1 | `stdin.rate_limits` | Claude Code ≥ 2.1.80 |
+| 1 | `stdin.rate_limits` | Claude Code ≥ 2.1.80, no auth needed |
 | 2 | Local cache | `~/.claude/claude-lifeline/usage-cache.json`, 5min TTL |
 | 3 | API fallback | `api.anthropic.com/api/oauth/usage`, 2s timeout |
-| 4 | Empty | No quota display |
+| 4 | Empty | Quota segments not displayed |
 
-### Performance
+## Performance
 
 - **~30ms** response time (well under Claude Code's 500ms budget)
-- **2.8MB** release binary (LTO + strip)
-- Git commands run concurrently with quota data fetch via `tokio::join!`
+- **~3MB** release binary (LTO + strip)
+- Git commands, usage data fetch run concurrently via `tokio::join!`
+- All binaries are fully static (musl on Linux, static CRT on Windows)
 
 ## Install
 
@@ -117,8 +267,8 @@ Restart Claude Code to activate.
 ## Uninstall
 
 ```bash
-rm ~/.claude/bin/claude-lifeline        # macOS / Linux
-del %USERPROFILE%\.claude\bin\claude-lifeline.exe   # Windows
+rm ~/.claude/bin/claude-lifeline                        # macOS / Linux
+del %USERPROFILE%\.claude\bin\claude-lifeline.exe       # Windows
 ```
 
 Remove the `statusLine` section from `~/.claude/settings.json`.
@@ -131,8 +281,12 @@ Remove the `statusLine` section from `~/.claude/settings.json`.
 | macOS | Intel (x86_64) | `claude-lifeline-x86_64-apple-darwin` |
 | Linux | x86_64 | `claude-lifeline-x86_64-unknown-linux-musl` (static) |
 | Linux | ARM64 | `claude-lifeline-aarch64-unknown-linux-musl` (static) |
-| Windows | x86_64 | `claude-lifeline-x86_64-pc-windows-msvc.exe` |
+| Windows | x86_64 | `claude-lifeline-x86_64-pc-windows-msvc.exe` (static CRT) |
+
+## Changelog
+
+See [docs/CHANGELOG.md](docs/CHANGELOG.md).
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).

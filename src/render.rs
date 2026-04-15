@@ -227,9 +227,10 @@ fn format_quota_suffix(
     format!("{DIM}({RESET}{inner}{DIM}){RESET}")
 }
 
-/// 格式化配速位置标签：/p15.23%
+/// 格式化配速位置标签：仅超速时显示 /p15.23%
 fn format_pace_label(pace: &Option<crate::usage::PaceInfo>) -> String {
     pace.as_ref()
+        .filter(|p| p.direction == crate::usage::PaceDirection::Over)
         .map(|p| format!("{DIM}/p{:.2}%{RESET}", p.pace_percent))
         .unwrap_or_default()
 }
