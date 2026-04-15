@@ -28,6 +28,8 @@ pub struct PaceInfo {
     pub direction: PaceDirection,
     /// 按当前消耗速率预估的耗尽时间（仅当耗尽时间早于窗口重置时有值）
     pub depletion_eta: Option<chrono::DateTime<chrono::Utc>>,
+    /// 停工恢复时间（秒）：停止使用后多久配速能追平当前用量
+    pub recovery_secs: Option<i64>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -181,10 +183,21 @@ pub fn calc_pace(window: &WindowUsage, window_secs: i64) -> Option<PaceInfo> {
         None
     };
 
+    // 恢复时间：超速时停工多久可以让配速追平用量
+    // recovery_secs = (used - pace) / (100 / window_secs) = (used - pace) * window_secs / 100
+    let recovery_secs = if direction == PaceDirection::Over {
+        let delta = window.used_percent - pace_percent;
+        let secs = (delta * window_secs as f64 / 100.0) as i64;
+        if secs > 0 { Some(secs) } else { None }
+    } else {
+        None
+    };
+
     Some(PaceInfo {
         pace_percent,
         direction,
         depletion_eta,
+        recovery_secs,
     })
 }
 

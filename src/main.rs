@@ -1,4 +1,5 @@
 mod auth;
+mod config;
 mod git;
 mod input;
 mod render;
@@ -39,8 +40,11 @@ async fn run() -> anyhow::Result<()> {
         crate::usage::get_usage_data(stdin.rate_limits.as_ref()),
     );
 
-    // 5. 渲染输出
-    let ctx = crate::render::RenderContext { stdin, git, usage, session_duration };
+    // 5. 读取配置
+    let config = crate::config::read_config();
+
+    // 6. 渲染输出
+    let ctx = crate::render::RenderContext { stdin, git, usage, session_duration, config };
     crate::render::render(&ctx);
 
     Ok(())

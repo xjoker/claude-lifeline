@@ -1,3 +1,4 @@
+use crate::config::Config;
 use crate::git::GitInfo;
 use crate::input::StdinData;
 use crate::usage::UsageData;
@@ -22,6 +23,7 @@ pub struct RenderContext {
     pub git: GitInfo,
     pub usage: UsageData,
     pub session_duration: Option<std::time::Duration>,
+    pub config: Config,
 }
 
 // ── 公共函数 ──
@@ -90,66 +92,74 @@ pub fn render(ctx: &RenderContext) {
     // ── 行2 ──
     let mut segments: Vec<String> = Vec::new();
 
-    // Segment 1: Context（>= 85% 时显示 token 明细）
-    let ctx_pct = crate::input::get_context_percent(&ctx.stdin);
-    let ctx_color = get_context_color(ctx_pct);
-    let ctx_bar = render_bar_with_pace(ctx_pct, None, 10, ctx_color);
-    let token_detail = if ctx_pct >= 85.0 {
-        ctx.stdin.context_window.as_ref()
-            .and_then(|cw| cw.current_usage.as_ref())
-            .map(|u| {
-                let input = u.input_tokens.unwrap_or(0);
-                let cache = u.cache_creation_input_tokens.unwrap_or(0)
-                    + u.cache_read_input_tokens.unwrap_or(0);
-                format!(" {DIM}(in:{} c:{}){RESET}", format_tokens(input), format_tokens(cache))
-            })
-            .unwrap_or_default()
-    } else {
-        String::new()
-    };
-    segments.push(format!(
-        "{DIM}ctx{RESET} {ctx_bar} {ctx_color}{:.0}%{RESET}{token_detail}",
-        ctx_pct
-    ));
-
-    // Segment 2: 5h quota
-    if let Some(five_hour) = &ctx.usage.five_hour {
-        let pace = crate::usage::calc_pace(five_hour, crate::usage::WINDOW_5H_SECS);
-        let over = pace.as_ref().is_some_and(|p| p.direction == crate::usage::PaceDirection::Over);
-        let color = get_quota_color_with_pace(five_hour.used_percent, over);
-        let pace_pct = pace.as_ref().map(|p| p.pace_percent);
-        let bar = render_bar_with_pace(five_hour.used_percent, pace_pct, 10, color);
-        let suffix = format_quota_suffix(&five_hour.resets_at, &pace);
-        let alert = if over { "!" } else { "" };
-        let pace_label = format_pace_label(&pace);
-
+    // Segment 1: Context（可配置，>= 85% 时显示 token 明细）
+    if ctx.config.display.context {
+        let ctx_pct = crate::input::get_context_percent(&ctx.stdin);
+        let ctx_color = get_context_color(ctx_pct);
+        let ctx_bar = render_bar_with_pace(ctx_pct, None, 10, ctx_color);
+        let token_detail = if ctx_pct >= 85.0 {
+            ctx.stdin.context_window.as_ref()
+                .and_then(|cw| cw.current_usage.as_ref())
+                .map(|u| {
+                    let input = u.input_tokens.unwrap_or(0);
+                    let cache = u.cache_creation_input_tokens.unwrap_or(0)
+                        + u.cache_read_input_tokens.unwrap_or(0);
+                    format!(" {DIM}(in:{} c:{}){RESET}", format_tokens(input), format_tokens(cache))
+                })
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
         segments.push(format!(
-            "{DIM}5h{RESET} {bar} {color}{:.0}%{alert}{RESET}{pace_label}{suffix}",
-            five_hour.used_percent
+            "{DIM}ctx{RESET} {ctx_bar} {ctx_color}{:.0}%{RESET}{token_detail}",
+            ctx_pct
         ));
     }
 
-    // Segment 3: 7d quota
-    if let Some(seven_day) = &ctx.usage.seven_day {
-        let pace = crate::usage::calc_pace(seven_day, crate::usage::WINDOW_7D_SECS);
-        let over = pace.as_ref().is_some_and(|p| p.direction == crate::usage::PaceDirection::Over);
-        let color = get_quota_color_with_pace(seven_day.used_percent, over);
-        let pace_pct = pace.as_ref().map(|p| p.pace_percent);
-        let bar = render_bar_with_pace(seven_day.used_percent, pace_pct, 10, color);
-        let suffix = format_quota_suffix(&seven_day.resets_at, &pace);
-        let alert = if over { "!" } else { "" };
-        let pace_label = format_pace_label(&pace);
+    // Segment 2: 5h quota（可配置）
+    if ctx.config.display.five_hour {
+        if let Some(five_hour) = &ctx.usage.five_hour {
+            let pace = crate::usage::calc_pace(five_hour, crate::usage::WINDOW_5H_SECS);
+            let over = pace.as_ref().is_some_and(|p| p.direction == crate::usage::PaceDirection::Over);
+            let color = get_quota_color_with_pace(five_hour.used_percent, over);
+            let pace_pct = pace.as_ref().map(|p| p.pace_percent);
+            let bar = render_bar_with_pace(five_hour.used_percent, pace_pct, 10, color);
+            let suffix = format_quota_suffix(&five_hour.resets_at, &pace);
+            let alert = if over { "!" } else { "" };
+            let pace_label = format_pace_label(&pace);
 
-        segments.push(format!(
-            "{DIM}7d{RESET} {bar} {color}{:.0}%{alert}{RESET}{pace_label}{suffix}",
-            seven_day.used_percent
-        ));
+            segments.push(format!(
+                "{DIM}5h{RESET} {bar} {color}{:.0}%{alert}{RESET}{pace_label}{suffix}",
+                five_hour.used_percent
+            ));
+        }
+    }
+
+    // Segment 3: 7d quota（可配置）
+    if ctx.config.display.seven_day {
+        if let Some(seven_day) = &ctx.usage.seven_day {
+            let pace = crate::usage::calc_pace(seven_day, crate::usage::WINDOW_7D_SECS);
+            let over = pace.as_ref().is_some_and(|p| p.direction == crate::usage::PaceDirection::Over);
+            let color = get_quota_color_with_pace(seven_day.used_percent, over);
+            let pace_pct = pace.as_ref().map(|p| p.pace_percent);
+            let bar = render_bar_with_pace(seven_day.used_percent, pace_pct, 10, color);
+            let suffix = format_quota_suffix(&seven_day.resets_at, &pace);
+            let alert = if over { "!" } else { "" };
+            let pace_label = format_pace_label(&pace);
+
+            segments.push(format!(
+                "{DIM}7d{RESET} {bar} {color}{:.0}%{alert}{RESET}{pace_label}{suffix}",
+                seven_day.used_percent
+            ));
+        }
     }
 
     let separator = format!("{DIM} │ {RESET}");
     let line2 = segments.join(&separator);
 
-    println!("{DIM}─────────────────────────────────────────{RESET}");
+    if ctx.config.display.separator {
+        println!("{DIM}─────────────────────────────────────────{RESET}");
+    }
     println!("{line1}");
     println!("{line2}");
 }
@@ -182,7 +192,22 @@ fn format_quota_suffix(
         })
         .unwrap_or_default();
 
-    if reset_str.is_empty() && depletion_str.is_empty() {
+    // 恢复时间：超速时显示停工多久可追平配速
+    let recovery_str = pace.as_ref()
+        .and_then(|p| p.recovery_secs)
+        .map(|secs| {
+            let formatted = if secs < 60 {
+                "1m".to_string()
+            } else if secs < 3600 {
+                format!("{}m", secs / 60)
+            } else {
+                format!("{}h {}m", secs / 3600, (secs % 3600) / 60)
+            };
+            format!(" {YELLOW}wait {formatted}{RESET}")
+        })
+        .unwrap_or_default();
+
+    if reset_str.is_empty() && depletion_str.is_empty() && recovery_str.is_empty() {
         return String::new();
     }
 
@@ -195,6 +220,9 @@ fn format_quota_suffix(
             inner.push(' ');
         }
         inner.push_str(&depletion_str);
+    }
+    if !recovery_str.is_empty() {
+        inner.push_str(&recovery_str);
     }
     format!("{DIM}({RESET}{inner}{DIM}){RESET}")
 }
