@@ -9,6 +9,8 @@ pub const DIM: &str = "\x1b[2m";
 pub const BOLD_WHITE: &str = "\x1b[1;37m";
 pub const GREEN: &str = "\x1b[32m";
 pub const YELLOW: &str = "\x1b[33m";
+pub const MAGENTA: &str = "\x1b[35m";
+pub const CYAN: &str = "\x1b[36m";
 pub const RED: &str = "\x1b[31m";
 pub const BRIGHT_BLUE: &str = "\x1b[94m";
 pub const BRIGHT_MAGENTA: &str = "\x1b[95m";
@@ -31,13 +33,14 @@ pub fn render(ctx: &RenderContext) {
     // ── 行1 ──
     let model_name = crate::input::get_model_name(&ctx.stdin);
 
+    // [Model | Plan] — 青色
     let model_section = if let Some(plan) = &ctx.usage.plan_name {
-        format!("[{} | {}]", model_name, plan)
+        format!("{CYAN}[{model_name} | {plan}]{RESET}")
     } else {
-        format!("[{}]", model_name)
+        format!("{CYAN}[{model_name}]{RESET}")
     };
 
-    // 项目名：cwd 的最后一个路径组件
+    // 项目名 — 黄色
     let project_name = ctx
         .stdin
         .cwd
@@ -51,16 +54,17 @@ pub fn render(ctx: &RenderContext) {
         .and_then(|p| std::path::Path::new(p).file_name())
         .and_then(|n| n.to_str())
         .unwrap_or("unknown");
+    let project_display = format!("{YELLOW}{project_name}{RESET}");
 
-    // git 部分
+    // git 部分 — git:() 品红，分支名青色
     let git_section = if let Some(branch) = &ctx.git.branch {
         let dirty = if ctx.git.is_dirty { "*" } else { "" };
-        format!("  git:({branch}{dirty})")
+        format!(" {MAGENTA}git:({RESET}{CYAN}{branch}{dirty}{RESET}{MAGENTA}){RESET}")
     } else {
         String::new()
     };
 
-    let line1 = format!("{model_section}  {project_name}{git_section}");
+    let line1 = format!("{model_section} {project_display}{git_section}");
 
     // ── 行2 ──
     let mut segments: Vec<String> = Vec::new();
@@ -70,36 +74,40 @@ pub fn render(ctx: &RenderContext) {
     let ctx_color = get_context_color(ctx_pct);
     let ctx_bar = render_bar_with_pace(ctx_pct, None, 10, ctx_color);
     segments.push(format!(
-        "ctx {ctx_bar} {ctx_color}{:.0}%{RESET}",
+        "{DIM}ctx{RESET} {ctx_bar} {ctx_color}{:.0}%{RESET}",
         ctx_pct
     ));
 
     // Segment 2: 5h quota
     if let Some(five_hour) = &ctx.usage.five_hour {
-        let color = get_quota_color(five_hour.used_percent);
         let pace = crate::usage::calc_pace(five_hour, crate::usage::WINDOW_5H_SECS);
+        let over = pace.as_ref().is_some_and(|p| p.direction == crate::usage::PaceDirection::Over);
+        // 超速时进度条变黄
+        let color = get_quota_color_with_pace(five_hour.used_percent, over);
         let pace_pct = pace.as_ref().map(|p| p.pace_percent);
         let bar = render_bar_with_pace(five_hour.used_percent, pace_pct, 10, color);
-
         let suffix = format_quota_suffix(&five_hour.resets_at, &pace);
+        // 超速时加 !
+        let alert = if over { "!" } else { "" };
 
         segments.push(format!(
-            "5h {bar} {color}{:.0}%{RESET}{suffix}",
+            "{DIM}5h{RESET} {bar} {color}{:.0}%{alert}{RESET}{suffix}",
             five_hour.used_percent
         ));
     }
 
     // Segment 3: 7d quota
     if let Some(seven_day) = &ctx.usage.seven_day {
-        let color = get_quota_color(seven_day.used_percent);
         let pace = crate::usage::calc_pace(seven_day, crate::usage::WINDOW_7D_SECS);
+        let over = pace.as_ref().is_some_and(|p| p.direction == crate::usage::PaceDirection::Over);
+        let color = get_quota_color_with_pace(seven_day.used_percent, over);
         let pace_pct = pace.as_ref().map(|p| p.pace_percent);
         let bar = render_bar_with_pace(seven_day.used_percent, pace_pct, 10, color);
-
         let suffix = format_quota_suffix(&seven_day.resets_at, &pace);
+        let alert = if over { "!" } else { "" };
 
         segments.push(format!(
-            "7d {bar} {color}{:.0}%{RESET}{suffix}",
+            "{DIM}7d{RESET} {bar} {color}{:.0}%{alert}{RESET}{suffix}",
             seven_day.used_percent
         ));
     }
@@ -134,14 +142,17 @@ fn format_quota_suffix(
         return String::new();
     }
 
-    let mut parts = Vec::new();
+    let mut inner = String::new();
     if !reset_str.is_empty() {
-        parts.push(reset_str);
+        inner.push_str(&format!("{DIM}{reset_str}{RESET}"));
     }
     if !direction_str.is_empty() {
-        parts.push(direction_str);
+        if !inner.is_empty() {
+            inner.push(' ');
+        }
+        inner.push_str(&direction_str);
     }
-    format!("({})", parts.join(" "))
+    format!("{DIM}({RESET}{inner}{DIM}){RESET}")
 }
 
 /// 渲染带配速标记的进度条
@@ -183,13 +194,13 @@ fn get_context_color(percent: f64) -> &'static str {
     }
 }
 
-/// Quota 颜色阈值
-fn get_quota_color(percent: f64) -> &'static str {
-    if percent < 75.0 {
-        BRIGHT_BLUE
-    } else if percent < 90.0 {
-        BRIGHT_MAGENTA
-    } else {
+/// Quota 颜色阈值（考虑超速状态）
+fn get_quota_color_with_pace(percent: f64, over_pace: bool) -> &'static str {
+    if percent >= 90.0 {
         RED
+    } else if over_pace || percent >= 75.0 {
+        YELLOW
+    } else {
+        BRIGHT_BLUE
     }
 }
