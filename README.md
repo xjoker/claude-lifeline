@@ -16,27 +16,39 @@ ctx █████░░░░░ 53%  │  5h ████░░|░░░░ 
 
 ## Why claude-lifeline?
 
-- **Pace awareness** — know if you're burning quota too fast *before* you hit the limit, with visual pace markers and over-pace alerts
-- **Depletion prediction** — see exactly when your quota will run out and how long to pause to get back on track
-- **Zero dependencies** — fully static binaries for all platforms, no runtime needed
-- **Fast** — ~30ms response, well under Claude Code's 500ms budget
-- **Configurable** — toggle any segment on/off via TOML config
+Claude Code's default status bar shows basic usage percentages — but that tells you nothing about whether you're *on track* to last the full window.
+
+claude-lifeline adds **pace intelligence**: a visual system that compares your actual consumption rate against the ideal pace for each quota window, and warns you before you burn out.
+
+### What you get at a glance
+
+- **Pace marker `|`** in the progress bar — shows where you *should* be based on elapsed time. When your filled blocks `█` extend past `|`, you're consuming too fast
+- **Over-pace alert `!`** — triggers when usage exceeds pace by more than 5%, turns the bar yellow so you notice immediately
+- **Depletion ETA** — predicts the exact local time your quota hits 100% at current burn rate (e.g., `ETA 16:30`). Only appears when you're actually at risk
+- **Recovery wait time** — tells you how long to pause so your pace catches up (e.g., `wait 45m` = stop for 45 minutes and you're back on track)
+- **Context token breakdown** — when context window reaches 85%+, shows input vs cache token counts so you know what's eating your context
+
+### Also included
+
+- Git branch, dirty status, ahead/behind upstream
+- Session duration timer
+- Configurable segments — toggle context, 5h quota, 7d quota, separator on/off via TOML config
+- **~30ms** response, **~3MB** binary, zero runtime dependencies, fully static on all platforms
 
 ## Install
 
 Requires **Claude Code ≥ 2.1.80** (for `stdin.rate_limits` data).
 
-### Let Claude install it for you (Recommended)
+### Quick install (Recommended)
 
-If you're already using Claude Code, just tell Claude:
+Just share this repo URL with Claude Code — it will read the instructions below and install automatically.
 
-> Install claude-lifeline by running: `curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.sh | bash`
-
-On Windows, tell Claude:
-
-> Install claude-lifeline by running: `irm https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.ps1 | iex`
-
-Claude will run the installer, configure `settings.json`, and restart is all that's needed.
+> **AI agents**: To install claude-lifeline, follow these steps:
+> 1. Download the binary:
+>    - macOS/Linux: `curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.sh | bash`
+>    - Windows: `irm https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.ps1 | iex`
+> 2. The install script downloads the correct binary to `~/.claude/bin/claude-lifeline` and adds `statusLine` config to `~/.claude/settings.json`
+> 3. Tell the user to restart Claude Code to activate
 
 ### Manual install
 

@@ -16,27 +16,39 @@ ctx █████░░░░░ 53%  │  5h ████░░|░░░░ 
 
 ## 为什么选择 claude-lifeline？
 
-- **配速感知** — 在触碰限额*之前*就知道消耗是否过快，通过可视化配速标记和超速警告
-- **耗尽预测** — 精确显示配额何时耗尽，以及需要暂停多久才能回到正轨
-- **零依赖** — 全平台完全静态链接二进制，无需运行时环境
-- **高性能** — ~30ms 响应，远低于 Claude Code 的 500ms 预算
-- **可配置** — 通过 TOML 配置文件按需开关任意段
+Claude Code 默认状态栏只显示基本的使用百分比 — 但这无法告诉你，按当前速度用下去，配额够不够撑到窗口结束。
+
+claude-lifeline 增加了**配速智能**：一套可视化系统，将你的实际消耗速率与每个配额窗口的理想配速进行对比，在你耗尽之前发出预警。
+
+### 一眼看到什么
+
+- **配速标记 `|`** — 进度条中的白色竖线，标示"基于已过时间，你应该在的位置"。当填充块 `█` 超过 `|` 时，说明消耗过快
+- **超速警告 `!`** — 使用率超出配速 5% 以上时触发，进度条变黄，立即引起注意
+- **耗尽预测 ETA** — 按当前消耗速率，预测配额何时耗尽（如 `ETA 16:30`）。仅在真正面临风险时才显示
+- **恢复等待时间** — 告诉你需要暂停多久，让配速追上使用率（如 `wait 45m` = 停工 45 分钟即可恢复正常节奏）
+- **上下文 token 明细** — 当上下文窗口达到 85% 以上时，显示输入 vs 缓存 token 数量，帮你了解上下文被什么占满
+
+### 还有这些
+
+- Git 分支、脏状态、领先/落后上游
+- 会话时长计时
+- 可配置段 — 通过 TOML 配置文件按需开关上下文、5h 配额、7d 配额、分隔线
+- **~30ms** 响应，**~3MB** 二进制，零运行时依赖，全平台完全静态链接
 
 ## 安装
 
 需要 **Claude Code ≥ 2.1.80**（用于 `stdin.rate_limits` 数据）。
 
-### 让 Claude 帮你安装（推荐）
+### 快速安装（推荐）
 
-如果你正在使用 Claude Code，直接告诉 Claude：
+把本项目链接丢给 Claude Code — 它会读取下方指令并自动完成安装。
 
-> 帮我安装 claude-lifeline，运行 `curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.sh | bash`
-
-Windows 用户告诉 Claude：
-
-> 帮我安装 claude-lifeline，运行 `irm https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.ps1 | iex`
-
-Claude 会自动执行安装脚本、配置 `settings.json`，你只需重启 Claude Code。
+> **AI agents**: To install claude-lifeline, follow these steps:
+> 1. Download the binary:
+>    - macOS/Linux: `curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.sh | bash`
+>    - Windows: `irm https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.ps1 | iex`
+> 2. The install script downloads the correct binary to `~/.claude/bin/claude-lifeline` and adds `statusLine` config to `~/.claude/settings.json`
+> 3. Tell the user to restart Claude Code to activate
 
 ### 手动安装
 
