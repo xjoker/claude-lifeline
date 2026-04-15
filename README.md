@@ -83,10 +83,16 @@ When consuming faster than sustainable (usage > pace + 5%), estimates when quota
 
 ## Install
 
-### One-line install (requires pre-built release)
+### macOS / Linux
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.sh | bash
+```
+
+### Windows (PowerShell)
+
+```powershell
+irm https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.ps1 | iex
 ```
 
 ### Build from source
@@ -115,18 +121,21 @@ Restart Claude Code to activate.
 ## Uninstall
 
 ```bash
-rm ~/.claude/bin/claude-lifeline
+rm ~/.claude/bin/claude-lifeline        # macOS / Linux
+del %USERPROFILE%\.claude\bin\claude-lifeline.exe   # Windows
 ```
 
 Remove the `statusLine` section from `~/.claude/settings.json`.
 
 ## Supported Platforms
 
-| Platform | Architecture |
-|----------|-------------|
-| macOS | Apple Silicon (arm64) |
-| macOS | Intel (x86_64) |
-| Linux | x86_64 |
+| Platform | Architecture | Binary |
+|----------|-------------|--------|
+| macOS | Apple Silicon (arm64) | `claude-lifeline-aarch64-apple-darwin` |
+| macOS | Intel (x86_64) | `claude-lifeline-x86_64-apple-darwin` |
+| Linux | x86_64 | `claude-lifeline-x86_64-unknown-linux-gnu` |
+| Linux | ARM64 | `claude-lifeline-aarch64-unknown-linux-gnu` |
+| Windows | x86_64 | `claude-lifeline-x86_64-pc-windows-msvc.exe` |
 
 ## License
 
