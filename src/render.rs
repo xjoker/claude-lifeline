@@ -153,9 +153,6 @@ pub fn render(ctx: &RenderContext) {
     let separator = format!("{DIM} │ {RESET}");
     let line2 = segments.join(&separator);
 
-    if ctx.config.display.separator {
-        println!("{DIM}─────────────────────────────────────────{RESET}");
-    }
     println!("{line1}");
     println!("{line2}");
 }

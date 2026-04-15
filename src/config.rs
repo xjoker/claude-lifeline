@@ -18,9 +18,6 @@ pub struct DisplayConfig {
     /// 显示 7d quota 段
     #[serde(default = "yes")]
     pub seven_day: bool,
-    /// 显示顶部分割线
-    #[serde(default = "yes")]
-    pub separator: bool,
 }
 
 fn yes() -> bool { true }
@@ -37,7 +34,6 @@ impl Default for DisplayConfig {
             context: true,
             five_hour: true,
             seven_day: true,
-            separator: true,
         }
     }
 }

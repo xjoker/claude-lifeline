@@ -32,7 +32,7 @@ claude-lifeline 增加了**配速智能**：一套可视化系统，将你的实
 
 - Git 分支、脏状态、领先/落后上游
 - 会话时长计时
-- 可配置段 — 通过 TOML 配置文件按需开关上下文、5h 配额、7d 配额、分隔线
+- 可配置段 — 通过 TOML 配置文件按需开关上下文、5h 配额、7d 配额
 - **~30ms** 响应，**~3MB** 二进制，零运行时依赖，全平台完全静态链接
 
 ## 安装
@@ -275,7 +275,6 @@ ctx █████████░ 92% (in:120k c:65k)
 context = true     # 上下文窗口段
 five_hour = true   # 5 小时配额段
 seven_day = true   # 7 天配额段
-separator = true   # 状态栏上方分割线
 ```
 
 参见 [config.example.toml](../config.example.toml) 获取参考。

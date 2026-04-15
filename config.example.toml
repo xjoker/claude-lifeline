@@ -6,4 +6,3 @@
 context = true     # context window 段
 five_hour = true   # 5h quota 段
 seven_day = true   # 7d quota 段
-separator = true   # 顶部分割线

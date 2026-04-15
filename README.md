@@ -32,7 +32,7 @@ claude-lifeline adds **pace intelligence**: a visual system that compares your a
 
 - Git branch, dirty status, ahead/behind upstream
 - Session duration timer
-- Configurable segments — toggle context, 5h quota, 7d quota, separator on/off via TOML config
+- Configurable segments — toggle context, 5h quota, 7d quota on/off via TOML config
 - **~30ms** response, **~3MB** binary, zero runtime dependencies, fully static on all platforms
 
 ## Install
@@ -275,7 +275,6 @@ Optional config file at `~/.claude/claude-lifeline/config.toml`. All options def
 context = true     # Context window segment
 five_hour = true   # 5-hour quota segment
 seven_day = true   # 7-day quota segment
-separator = true   # Separator line above status bar
 ```
 
 See [config.example.toml](config.example.toml) for reference.
