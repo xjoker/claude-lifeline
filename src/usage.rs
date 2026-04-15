@@ -1,4 +1,6 @@
 use crate::input::RateLimits;
+use chrono::{DateTime, Utc};
+use serde::Deserialize;
 
 // ── Usage 数据（rate_limits + cache + API fallback + pace） ──
 
@@ -53,26 +55,283 @@ struct CachedUsage {
     plan_name: Option<String>,
 }
 
+// ── API 响应结构 ──
+
+#[derive(Debug, Deserialize)]
+struct ApiUsageResponse {
+    five_hour: Option<ApiWindow>,
+    seven_day: Option<ApiWindow>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ApiWindow {
+    utilization: Option<f64>,
+    resets_at: Option<String>,
+}
+
 // ── 常量 ──
 
 pub const WINDOW_5H_SECS: i64 = 5 * 3600;
 pub const WINDOW_7D_SECS: i64 = 7 * 24 * 3600;
 const CACHE_TTL_SUCCESS: i64 = 5 * 60;
-const CACHE_TTL_FAILURE: i64 = 15;
+const _CACHE_TTL_FAILURE: i64 = 15;
 
 // ── 公共函数 ──
 
 /// 从 stdin rate_limits + cache + API fallback 获取 usage 数据
 pub async fn get_usage_data(rate_limits: Option<&RateLimits>) -> UsageData {
-    todo!()
+    // 优先级 1: stdin rate_limits
+    if let Some(rl) = rate_limits {
+        let five_hour = rl.five_hour.as_ref().map(|w| WindowUsage {
+            used_percent: w.used_percentage.unwrap_or(0.0),
+            resets_at: w
+                .resets_at
+                .as_deref()
+                .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+                .map(|dt| dt.with_timezone(&Utc)),
+        });
+        let seven_day = rl.seven_day.as_ref().map(|w| WindowUsage {
+            used_percent: w.used_percentage.unwrap_or(0.0),
+            resets_at: w
+                .resets_at
+                .as_deref()
+                .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+                .map(|dt| dt.with_timezone(&Utc)),
+        });
+
+        let has_data = five_hour.is_some() || seven_day.is_some();
+        if has_data {
+            // 尝试从 credentials 获取 plan_name
+            let plan_name = get_plan_name_from_credentials();
+
+            let usage = UsageData {
+                five_hour,
+                seven_day,
+                plan_name,
+            };
+            // 写入缓存（异步但不等待结果）
+            write_cache(&usage);
+            return usage;
+        }
+    }
+
+    // 优先级 2: 缓存文件
+    if let Some(cache) = read_cache() {
+        if is_cache_fresh(&cache) {
+            let usage = cached_to_usage(&cache.data);
+            return usage;
+        }
+    }
+
+    // 优先级 3: API fallback
+    if let Some(usage) = fetch_usage_from_api().await {
+        write_cache(&usage);
+        return usage;
+    }
+
+    // 优先级 4: 无数据
+    UsageData {
+        five_hour: None,
+        seven_day: None,
+        plan_name: get_plan_name_from_credentials(),
+    }
 }
 
 /// 计算配速信息
 pub fn calc_pace(window: &WindowUsage, window_secs: i64) -> Option<PaceInfo> {
-    todo!()
+    let resets_at = window.resets_at.as_ref()?;
+    let now = Utc::now();
+    let remaining_secs = (*resets_at - now).num_seconds();
+    let elapsed_secs = window_secs - remaining_secs;
+
+    let pace_percent = ((elapsed_secs as f64 / window_secs as f64) * 100.0).clamp(0.0, 100.0);
+
+    let direction = if window.used_percent > pace_percent + 10.0 {
+        PaceDirection::Over
+    } else if window.used_percent < pace_percent - 10.0 {
+        PaceDirection::Under
+    } else {
+        PaceDirection::Normal
+    };
+
+    Some(PaceInfo {
+        pace_percent,
+        direction,
+    })
 }
 
 /// 格式化重置时间（Xm / Xh Ym / Xd Yh）
 pub fn format_reset_time(resets_at: &chrono::DateTime<chrono::Utc>) -> String {
-    todo!()
+    let now = Utc::now();
+    let diff = *resets_at - now;
+    let total_secs = diff.num_seconds();
+
+    if total_secs <= 0 {
+        return String::new();
+    }
+
+    let total_minutes = total_secs / 60;
+    let total_hours = total_secs / 3600;
+    let total_days = total_secs / 86400;
+
+    if total_hours < 1 {
+        // < 1h → "Xm"
+        let minutes = total_minutes.max(1);
+        format!("{minutes}m")
+    } else if total_days < 1 {
+        // < 24h → "Xh Ym"
+        let hours = total_hours;
+        let minutes = (total_secs % 3600) / 60;
+        format!("{hours}h {minutes}m")
+    } else {
+        // >= 1d → "Xd Yh"
+        let days = total_days;
+        let hours = (total_secs % 86400) / 3600;
+        format!("{days}d {hours}h")
+    }
+}
+
+// ── 私有辅助函数 ──
+
+/// 缓存文件路径: ~/.claude/claude-lifeline/usage-cache.json
+fn cache_path() -> std::path::PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    std::path::PathBuf::from(home)
+        .join(".claude")
+        .join("claude-lifeline")
+        .join("usage-cache.json")
+}
+
+/// 读取缓存文件
+fn read_cache() -> Option<CacheFile> {
+    let path = cache_path();
+    let content = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str(&content).ok()
+}
+
+/// 写入缓存文件
+fn write_cache(data: &UsageData) {
+    let path = cache_path();
+    // 创建目录
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+
+    let cached = CachedUsage {
+        five_hour_pct: data.five_hour.as_ref().map(|w| w.used_percent),
+        five_hour_resets_at: data
+            .five_hour
+            .as_ref()
+            .and_then(|w| w.resets_at.map(|dt| dt.to_rfc3339())),
+        seven_day_pct: data.seven_day.as_ref().map(|w| w.used_percent),
+        seven_day_resets_at: data
+            .seven_day
+            .as_ref()
+            .and_then(|w| w.resets_at.map(|dt| dt.to_rfc3339())),
+        plan_name: data.plan_name.clone(),
+    };
+
+    let cache_file = CacheFile {
+        data: cached,
+        timestamp: Utc::now().timestamp(),
+    };
+
+    if let Ok(json) = serde_json::to_string(&cache_file) {
+        let _ = std::fs::write(path, json);
+    }
+}
+
+/// 检查缓存是否在 TTL 内
+fn is_cache_fresh(cache: &CacheFile) -> bool {
+    let now = Utc::now().timestamp();
+    now - cache.timestamp < CACHE_TTL_SUCCESS
+}
+
+/// 从 CachedUsage 转换为 UsageData
+fn cached_to_usage(cached: &CachedUsage) -> UsageData {
+    let five_hour = cached.five_hour_pct.map(|pct| WindowUsage {
+        used_percent: pct,
+        resets_at: cached
+            .five_hour_resets_at
+            .as_deref()
+            .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+            .map(|dt| dt.with_timezone(&Utc)),
+    });
+
+    let seven_day = cached.seven_day_pct.map(|pct| WindowUsage {
+        used_percent: pct,
+        resets_at: cached
+            .seven_day_resets_at
+            .as_deref()
+            .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+            .map(|dt| dt.with_timezone(&Utc)),
+    });
+
+    UsageData {
+        five_hour,
+        seven_day,
+        plan_name: cached.plan_name.clone(),
+    }
+}
+
+/// 从 credentials 获取 plan_name
+fn get_plan_name_from_credentials() -> Option<String> {
+    let cred = crate::auth::read_credentials()?;
+    let sub_type = cred.subscription_type.as_deref()?;
+    Some(crate::auth::parse_plan_name(sub_type).to_string())
+}
+
+/// 通过 API 获取 usage 数据
+async fn fetch_usage_from_api() -> Option<UsageData> {
+    let cred = crate::auth::read_credentials()?;
+    let token = cred.access_token.as_deref()?;
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(2))
+        .build()
+        .ok()?;
+
+    let resp = client
+        .get("https://api.anthropic.com/api/oauth/usage")
+        .header("Authorization", format!("Bearer {token}"))
+        .header("anthropic-beta", "oauth-2025-04-20")
+        .header("User-Agent", "claude-code/2.1")
+        .send()
+        .await
+        .ok()?;
+
+    if !resp.status().is_success() {
+        return None;
+    }
+
+    let api_resp: ApiUsageResponse = resp.json().await.ok()?;
+
+    let five_hour = api_resp.five_hour.map(|w| WindowUsage {
+        used_percent: w.utilization.unwrap_or(0.0),
+        resets_at: w
+            .resets_at
+            .as_deref()
+            .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+            .map(|dt| dt.with_timezone(&Utc)),
+    });
+
+    let seven_day = api_resp.seven_day.map(|w| WindowUsage {
+        used_percent: w.utilization.unwrap_or(0.0),
+        resets_at: w
+            .resets_at
+            .as_deref()
+            .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+            .map(|dt| dt.with_timezone(&Utc)),
+    });
+
+    let plan_name = cred
+        .subscription_type
+        .as_deref()
+        .map(|s| crate::auth::parse_plan_name(s).to_string());
+
+    Some(UsageData {
+        five_hour,
+        seven_day,
+        plan_name,
+    })
 }

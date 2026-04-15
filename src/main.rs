@@ -6,9 +6,36 @@ mod usage;
 
 #[tokio::main]
 async fn main() {
+    if let Err(_) = run().await {
+        return;
+    }
+}
+
+async fn run() -> anyhow::Result<()> {
     // 1. 读 stdin JSON
-    // 2. 并发：git info + usage data
-    // 3. 渲染输出
-    // 任何错误静默退出（status line 不能 panic）
-    todo!()
+    let stdin = crate::input::read_stdin().await?;
+
+    // 2. 获取 cwd 用于 git
+    let cwd = stdin
+        .cwd
+        .clone()
+        .or_else(|| {
+            stdin
+                .workspace
+                .as_ref()
+                .and_then(|w| w.current_dir.clone())
+        })
+        .unwrap_or_default();
+
+    // 3. 并发：git info + usage data
+    let (git, usage) = tokio::join!(
+        crate::git::get_git_info(&cwd),
+        crate::usage::get_usage_data(stdin.rate_limits.as_ref()),
+    );
+
+    // 4. 渲染输出
+    let ctx = crate::render::RenderContext { stdin, git, usage };
+    crate::render::render(&ctx);
+
+    Ok(())
 }

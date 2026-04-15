@@ -61,15 +61,48 @@ pub struct RateLimitWindow {
 
 /// 从 stdin 读取并解析 JSON
 pub async fn read_stdin() -> anyhow::Result<StdinData> {
-    todo!()
+    use tokio::io::AsyncReadExt;
+
+    let mut buf = String::new();
+    tokio::io::stdin().read_to_string(&mut buf).await?;
+    let data: StdinData = serde_json::from_str(&buf)?;
+    Ok(data)
 }
 
 /// 获取模型显示名称
 pub fn get_model_name(stdin: &StdinData) -> String {
-    todo!()
+    if let Some(model) = &stdin.model {
+        if let Some(name) = &model.display_name {
+            if !name.is_empty() {
+                return name.clone();
+            }
+        }
+        if let Some(id) = &model.id {
+            return id.clone();
+        }
+    }
+    "Unknown".to_string()
 }
 
 /// 获取 context 使用百分比（优先 native，回退手动计算）
 pub fn get_context_percent(stdin: &StdinData) -> f64 {
-    todo!()
+    if let Some(ctx) = &stdin.context_window {
+        // 优先使用 used_percentage
+        if let Some(pct) = ctx.used_percentage {
+            return pct.clamp(0.0, 100.0);
+        }
+
+        // 回退：手动计算
+        if let (Some(usage), Some(window_size)) = (&ctx.current_usage, ctx.context_window_size) {
+            if window_size > 0 {
+                let input = usage.input_tokens.unwrap_or(0) as f64;
+                let cache_create = usage.cache_creation_input_tokens.unwrap_or(0) as f64;
+                let cache_read = usage.cache_read_input_tokens.unwrap_or(0) as f64;
+                let total = input + cache_create + cache_read;
+                let pct = (total / window_size as f64) * 100.0;
+                return pct.clamp(0.0, 100.0);
+            }
+        }
+    }
+    0.0
 }
