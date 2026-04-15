@@ -39,16 +39,24 @@ claude-lifeline 增加了**配速智能**：一套可视化系统，将你的实
 
 需要 **Claude Code ≥ 2.1.80**（用于 `stdin.rate_limits` 数据）。
 
-### 快速安装（推荐）
+### 让 AI 帮你装（推荐）
 
 把本项目链接丢给 Claude Code — 它会读取下方指令并自动完成安装。
 
 > **AI agents**: To install claude-lifeline, follow these steps:
-> 1. Download the binary:
->    - macOS/Linux: `curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.sh | bash`
->    - Windows: `irm https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.ps1 | iex`
-> 2. The install script downloads the correct binary to `~/.claude/bin/claude-lifeline` and adds `statusLine` config to `~/.claude/settings.json`
-> 3. Tell the user to restart Claude Code to activate
+> 1. Detect the user's platform and download the correct binary from the [latest release](https://github.com/xjoker/claude-lifeline/releases/latest):
+>    - macOS Apple Silicon: `claude-lifeline-aarch64-apple-darwin`
+>    - macOS Intel: `claude-lifeline-x86_64-apple-darwin`
+>    - Linux x86_64: `claude-lifeline-x86_64-unknown-linux-musl`
+>    - Linux ARM64: `claude-lifeline-aarch64-unknown-linux-musl`
+>    - Windows x86_64: `claude-lifeline-x86_64-pc-windows-msvc.exe`
+> 2. Save the binary to `~/.claude/bin/claude-lifeline` (Windows: `%USERPROFILE%\.claude\bin\claude-lifeline.exe`), create the directory if it doesn't exist, and make it executable (`chmod +x`)
+> 3. Edit `~/.claude/settings.json` — add or merge the following key into the existing JSON:
+>    ```json
+>    "statusLine": { "type": "command", "command": "~/.claude/bin/claude-lifeline" }
+>    ```
+>    Do NOT overwrite the entire file — preserve all existing settings.
+> 4. Tell the user to restart Claude Code to activate the new status line.
 
 ### 手动安装
 
