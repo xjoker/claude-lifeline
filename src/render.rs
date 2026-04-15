@@ -14,7 +14,6 @@ pub const MAGENTA: &str = "\x1b[35m";
 pub const CYAN: &str = "\x1b[36m";
 pub const RED: &str = "\x1b[31m";
 pub const BRIGHT_BLUE: &str = "\x1b[94m";
-pub const BRIGHT_MAGENTA: &str = "\x1b[95m";
 
 // ── 渲染上下文 ──
 

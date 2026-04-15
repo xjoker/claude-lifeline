@@ -45,11 +45,14 @@ if (-not $Latest) {
     exit 1
 }
 
+# --version outputs "claude-lifeline 0.0.1", tag is "v0.0.1"
+$LatestVer = $Latest.TrimStart("v")
+
 if (Test-Path "$InstallDir\$BinName") {
     try {
         $Current = & "$InstallDir\$BinName" --version 2>$null
         Write-Host "Current: $Current, Latest: $Latest"
-        if ($Current -match $Latest) {
+        if ($Current -eq "claude-lifeline $LatestVer") {
             Write-Host "Already up to date."
             exit 0
         }
@@ -86,7 +89,10 @@ if (Test-Path $Settings) {
         Write-Host "Updated settings.json (backup: settings.json.bak)"
     }
 } else {
-    Write-Host "Warning: $Settings not found. Create it or add statusLine config manually."
+    # Create settings.json if it doesn't exist
+    New-Item -ItemType Directory -Force -Path (Split-Path $Settings) | Out-Null
+    @{statusLine = @{type = "command"; command = "~/.claude/bin/claude-lifeline"}} | ConvertTo-Json -Depth 10 | Set-Content $Settings -Encoding UTF8
+    Write-Host "Created $Settings"
 }
 
 Write-Host ""

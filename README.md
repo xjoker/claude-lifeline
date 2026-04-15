@@ -33,7 +33,7 @@ claude-lifeline adds **pace intelligence**: a visual system that compares your a
 - Git branch, dirty status, ahead/behind upstream
 - Session duration timer
 - Configurable segments — toggle context, 5h quota, 7d quota on/off via TOML config
-- **~30ms** response, **~3MB** binary, zero runtime dependencies, fully static on all platforms
+- **~30ms** response, **~3MB** binary, zero runtime dependencies (static on Linux/Windows, signed on macOS)
 
 ## Install
 

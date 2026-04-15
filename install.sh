@@ -6,66 +6,40 @@ INSTALL_DIR="$HOME/.claude/bin"
 BIN_NAME="claude-lifeline"
 SETTINGS="$HOME/.claude/settings.json"
 STATUS_LINE_CMD="~/.claude/bin/claude-lifeline"
+STATUS_LINE_JSON='{"type":"command","command":"~/.claude/bin/claude-lifeline"}'
 
-# ── JSON helpers (no python3 / jq dependency) ──
+# ── JSON helpers (jq preferred, sed fallback) ──
 
-# Check if settings.json contains statusLine command
-has_status_line() {
-  grep -q "\"command\".*\"$STATUS_LINE_CMD\"" "$SETTINGS" 2>/dev/null
-}
+has_jq() { command -v jq &>/dev/null; }
 
-# Add statusLine to settings.json using sed
-add_status_line() {
+settings_add() {
   cp "$SETTINGS" "$SETTINGS.bak"
-  # Remove existing statusLine block if present
-  if grep -q '"statusLine"' "$SETTINGS"; then
-    # Replace existing statusLine object (handles multi-line)
-    local tmp
-    tmp=$(mktemp)
-    awk '
-      /"statusLine"/ { skip=1; brace=0 }
-      skip && /{/ { brace++ }
-      skip && /}/ { brace--; if(brace<=0){skip=0; next} }
-      skip { next }
-      { print }
-    ' "$SETTINGS" > "$tmp"
-    mv "$tmp" "$SETTINGS"
+  if has_jq; then
+    jq --argjson sl "$STATUS_LINE_JSON" '.statusLine = $sl' "$SETTINGS.bak" > "$SETTINGS"
+  else
+    # sed fallback: insert before final }
+    sed -i.tmp 's/}[[:space:]]*$/,"statusLine":{"type":"command","command":"~\/.claude\/bin\/claude-lifeline"}}/' "$SETTINGS"
+    rm -f "$SETTINGS.tmp"
   fi
-  # Insert statusLine before the closing brace
-  local tmp
-  tmp=$(mktemp)
-  awk '
-    /^}[[:space:]]*$/ {
-      # Remove trailing comma issues - add comma to previous non-empty line
-      print "  ,\"statusLine\": {\"type\": \"command\", \"command\": \"'"$STATUS_LINE_CMD"'\"}"
-    }
-    { print }
-  ' "$SETTINGS" > "$tmp"
-  mv "$tmp" "$SETTINGS"
   echo "Updated settings.json (backup: settings.json.bak)"
 }
 
-# Remove statusLine from settings.json
-remove_status_line() {
-  if ! grep -q '"statusLine"' "$SETTINGS"; then
+settings_remove() {
+  if ! grep -q '"statusLine"' "$SETTINGS" 2>/dev/null; then
     echo "No statusLine config found in settings.json"
     return
   fi
   cp "$SETTINGS" "$SETTINGS.bak"
-  local tmp
-  tmp=$(mktemp)
-  awk '
-    /"statusLine"/ { skip=1; brace=0; comma_before=prev_comma }
-    skip && /{/ { brace++ }
-    skip && /}/ { brace--; if(brace<=0){skip=0; next} }
-    skip { next }
-    {
-      prev_comma = /,$/
-      print
-    }
-  ' "$SETTINGS" > "$tmp"
-  mv "$tmp" "$SETTINGS"
+  if has_jq; then
+    jq 'del(.statusLine)' "$SETTINGS.bak" > "$SETTINGS"
+  else
+    echo "Warning: jq not found. Please manually remove \"statusLine\" from $SETTINGS"
+  fi
   echo "Removed statusLine from settings.json (backup: settings.json.bak)"
+}
+
+settings_has() {
+  grep -q "\"command\".*\"$STATUS_LINE_CMD\"" "$SETTINGS" 2>/dev/null
 }
 
 # ── 命令解析 ──
@@ -77,9 +51,7 @@ case "$ACTION" in
   uninstall)
     echo "Uninstalling claude-lifeline..."
     rm -f "$INSTALL_DIR/$BIN_NAME"
-    if [ -f "$SETTINGS" ]; then
-      remove_status_line
-    fi
+    [ -f "$SETTINGS" ] && settings_remove
     echo "Done! Restart Claude Code to apply."
     exit 0
     ;;
@@ -117,10 +89,13 @@ if [ -z "$LATEST" ]; then
   exit 1
 fi
 
+# --version 输出 "claude-lifeline 0.0.1", tag 是 "v0.0.1"
+LATEST_VER="${LATEST#v}"
+
 if [ "$ACTION" = "upgrade" ] && [ -x "$INSTALL_DIR/$BIN_NAME" ]; then
   CURRENT=$("$INSTALL_DIR/$BIN_NAME" --version 2>/dev/null || echo "unknown")
   echo "Current: $CURRENT, Latest: $LATEST"
-  if [ "$CURRENT" = "$BIN_NAME $LATEST" ] || [ "$CURRENT" = "$LATEST" ]; then
+  if [ "$CURRENT" = "$BIN_NAME $LATEST_VER" ]; then
     echo "Already up to date."
     exit 0
   fi
@@ -135,7 +110,7 @@ mkdir -p "$INSTALL_DIR"
 curl -fsSL "$URL" -o "$INSTALL_DIR/$BIN_NAME"
 chmod +x "$INSTALL_DIR/$BIN_NAME"
 
-# macOS: 移除 Gatekeeper 隔离标记（未签名二进制）
+# macOS: 移除 Gatekeeper 隔离标记
 if [ "$OS" = "darwin" ]; then
   xattr -d com.apple.quarantine "$INSTALL_DIR/$BIN_NAME" 2>/dev/null || true
 fi
@@ -145,15 +120,14 @@ echo "Installed to $INSTALL_DIR/$BIN_NAME"
 # ── 配置 settings.json ──
 
 if [ -f "$SETTINGS" ]; then
-  if has_status_line; then
+  if settings_has; then
     echo "settings.json already configured"
   else
-    add_status_line
+    settings_add
   fi
 else
-  # Create minimal settings.json
   mkdir -p "$(dirname "$SETTINGS")"
-  echo '{"statusLine": {"type": "command", "command": "'"$STATUS_LINE_CMD"'"}}' > "$SETTINGS"
+  printf '{\n  "statusLine": {"type": "command", "command": "%s"}\n}\n' "$STATUS_LINE_CMD" > "$SETTINGS"
   echo "Created $SETTINGS"
 fi
 

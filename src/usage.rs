@@ -274,10 +274,22 @@ fn write_cache(data: &UsageData) {
     }
 }
 
-/// 检查缓存是否在 TTL 内
+/// 检查缓存是否在 TTL 内且 resets_at 未过期
 fn is_cache_fresh(cache: &CacheFile) -> bool {
     let now = Utc::now().timestamp();
-    now - cache.timestamp < CACHE_TTL_SUCCESS
+    if now - cache.timestamp >= CACHE_TTL_SUCCESS {
+        return false;
+    }
+    // resets_at 已过期则缓存无效（窗口已重置）
+    let now_dt = Utc::now();
+    for resets_at_str in [&cache.data.five_hour_resets_at, &cache.data.seven_day_resets_at].into_iter().flatten() {
+        if let Ok(dt) = DateTime::parse_from_rfc3339(resets_at_str) {
+            if dt.with_timezone(&Utc) < now_dt {
+                return false;
+            }
+        }
+    }
+    true
 }
 
 /// 从 CachedUsage 转换为 UsageData

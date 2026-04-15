@@ -3,6 +3,7 @@ use serde::Deserialize;
 // ── stdin JSON 结构体（Claude Code 每次 spawn 时通过 stdin 推送） ──
 
 #[derive(Debug, Default, Deserialize)]
+#[allow(dead_code)]
 pub struct StdinData {
     pub session_id: Option<String>,
     pub transcript_path: Option<String>,
@@ -27,6 +28,7 @@ pub struct WorkspaceInfo {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct CostInfo {
     pub total_cost_usd: Option<f64>,
 }
