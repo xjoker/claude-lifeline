@@ -12,30 +12,6 @@ pub struct CredentialsFile {
 pub struct OAuthCredential {
     #[serde(rename = "accessToken")]
     pub access_token: Option<String>,
-    #[serde(rename = "subscriptionType")]
-    pub subscription_type: Option<String>,
-    #[serde(rename = "expiresAt")]
-    pub expires_at: Option<u64>,
-}
-
-/// 计划名称（从 subscriptionType 映射）
-#[derive(Debug, Clone, PartialEq)]
-pub enum PlanName {
-    Max,
-    Pro,
-    Team,
-    Unknown(String),
-}
-
-impl std::fmt::Display for PlanName {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            PlanName::Max => write!(f, "Max"),
-            PlanName::Pro => write!(f, "Pro"),
-            PlanName::Team => write!(f, "Team"),
-            PlanName::Unknown(s) => write!(f, "{s}"),
-        }
-    }
 }
 
 // ── 公共函数 ──
@@ -55,18 +31,4 @@ pub fn read_credentials() -> Option<OAuthCredential> {
     let content = std::fs::read_to_string(&path).ok()?;
     let creds: CredentialsFile = serde_json::from_str(&content).ok()?;
     creds.claude_ai_oauth
-}
-
-/// 从 subscriptionType 映射到 PlanName
-pub fn parse_plan_name(subscription_type: &str) -> PlanName {
-    let lower = subscription_type.to_lowercase();
-    if lower.contains("max") {
-        PlanName::Max
-    } else if lower.contains("pro") {
-        PlanName::Pro
-    } else if lower.contains("team") {
-        PlanName::Team
-    } else {
-        PlanName::Unknown(subscription_type.to_string())
-    }
 }

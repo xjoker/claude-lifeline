@@ -13,6 +13,13 @@ async fn main() {
 }
 
 async fn run() -> anyhow::Result<()> {
+    // --version 支持（安装脚本版本检查用）
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--version" || a == "-V") {
+        println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+
     // 1. 读 stdin JSON
     let stdin = crate::input::read_stdin().await?;
 

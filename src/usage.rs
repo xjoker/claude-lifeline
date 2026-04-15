@@ -8,7 +8,6 @@ use serde::Deserialize;
 pub struct UsageData {
     pub five_hour: Option<WindowUsage>,
     pub seven_day: Option<WindowUsage>,
-    pub plan_name: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -56,7 +55,6 @@ struct CachedUsage {
     five_hour_resets_at: Option<String>,
     seven_day_pct: Option<f64>,
     seven_day_resets_at: Option<String>,
-    plan_name: Option<String>,
 }
 
 // ── API 响应结构 ──
@@ -112,13 +110,9 @@ pub async fn get_usage_data(rate_limits: Option<&RateLimits>) -> UsageData {
 
         let has_data = five_hour.is_some() || seven_day.is_some();
         if has_data {
-            // 尝试从 credentials 获取 plan_name
-            let plan_name = get_plan_name_from_credentials();
-
             let usage = UsageData {
                 five_hour,
                 seven_day,
-                plan_name,
             };
             // 写入缓存（异步但不等待结果）
             write_cache(&usage);
@@ -144,7 +138,6 @@ pub async fn get_usage_data(rate_limits: Option<&RateLimits>) -> UsageData {
     UsageData {
         five_hour: None,
         seven_day: None,
-        plan_name: get_plan_name_from_credentials(),
     }
 }
 
@@ -269,7 +262,6 @@ fn write_cache(data: &UsageData) {
             .seven_day
             .as_ref()
             .and_then(|w| w.resets_at.map(|dt| dt.to_rfc3339())),
-        plan_name: data.plan_name.clone(),
     };
 
     let cache_file = CacheFile {
@@ -311,15 +303,7 @@ fn cached_to_usage(cached: &CachedUsage) -> UsageData {
     UsageData {
         five_hour,
         seven_day,
-        plan_name: cached.plan_name.clone(),
     }
-}
-
-/// 从 credentials 获取 plan_name
-fn get_plan_name_from_credentials() -> Option<String> {
-    let cred = crate::auth::read_credentials()?;
-    let sub_type = cred.subscription_type.as_deref()?;
-    Some(crate::auth::parse_plan_name(sub_type).to_string())
 }
 
 /// 通过 API 获取 usage 数据
@@ -365,14 +349,8 @@ async fn fetch_usage_from_api() -> Option<UsageData> {
             .map(|dt| dt.with_timezone(&Utc)),
     });
 
-    let plan_name = cred
-        .subscription_type
-        .as_deref()
-        .map(|s| crate::auth::parse_plan_name(s).to_string());
-
     Some(UsageData {
         five_hour,
         seven_day,
-        plan_name,
     })
 }

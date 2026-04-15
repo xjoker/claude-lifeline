@@ -1,24 +1,115 @@
 # claude-lifeline
 
-高性能 Rust 状态栏，为 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 打造，替代默认状态栏，提供丰富功能，响应时间低于 50ms。
+高性能 Rust 状态栏，为 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 打造，替代默认状态栏，提供丰富功能，响应时间低于 50ms。支持 **macOS**、**Linux** 和 **Windows**。
 
 **[English](../README.md)**
 
 ## 预览
 
+![claude-lifeline 截图](img.png)
+
 ```
 ─────────────────────────────────────────
-[Opus 4.6 | Max]  my-project  git:(main* ↑2)  1h 23m
+[Opus 4.6]  my-project  git:(main* ↑2)  1h 23m
 ctx █████░░░░░ 53%  │  5h ████░░|░░░░ 34%(1h 23m)  │  7d ██|█░░░░░░░ 22%!/p14.05%(6d 0h ETA 4/19 08:18 wait 13h)
 ```
+
+## 为什么选择 claude-lifeline？
+
+- **配速感知** — 在触碰限额*之前*就知道消耗是否过快，通过可视化配速标记和超速警告
+- **耗尽预测** — 精确显示配额何时耗尽，以及需要暂停多久才能回到正轨
+- **零依赖** — 全平台完全静态链接二进制，无需运行时环境
+- **高性能** — ~30ms 响应，远低于 Claude Code 的 500ms 预算
+- **可配置** — 通过 TOML 配置文件按需开关任意段
+
+## 安装
+
+需要 **Claude Code ≥ 2.1.80**（用于 `stdin.rate_limits` 数据）。
+
+### 让 Claude 帮你安装（推荐）
+
+如果你正在使用 Claude Code，直接告诉 Claude：
+
+> 帮我安装 claude-lifeline，运行 `curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.sh | bash`
+
+Windows 用户告诉 Claude：
+
+> 帮我安装 claude-lifeline，运行 `irm https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.ps1 | iex`
+
+Claude 会自动执行安装脚本、配置 `settings.json`，你只需重启 Claude Code。
+
+### 手动安装
+
+**macOS / Linux：**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.sh | bash
+```
+
+**Windows (PowerShell)：**
+
+```powershell
+irm https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.ps1 | iex
+```
+
+安装后重启 Claude Code 即可生效。
+
+### 从源码构建
+
+```bash
+git clone https://github.com/xjoker/claude-lifeline.git
+cd claude-lifeline
+cargo build --release
+mkdir -p ~/.claude/bin
+cp target/release/claude-lifeline ~/.claude/bin/
+```
+
+然后在 `~/.claude/settings.json` 中添加：
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "~/.claude/bin/claude-lifeline"
+  }
+}
+```
+
+### 升级
+
+```bash
+# macOS / Linux
+curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.sh | bash -s upgrade
+```
+
+Windows：重新运行安装命令即可 — 已是最新版本时会自动跳过。
+
+### 卸载
+
+```bash
+# macOS / Linux
+curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.sh | bash -s uninstall
+```
+
+```powershell
+# Windows (PowerShell)
+& { $env:ACTION='uninstall'; irm https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.ps1 | iex }
+```
+
+## 功能详解
 
 ### 第一行 — 会话信息
 
 ```
-[Opus 4.6 | Max]  my-project  git:(main* ↑2)  1h 23m
- ^^^^^^^^^^^       ^^^^^^^^^^      ^^^^^^^^^   ^^^^^^
- 模型和订阅计划     项目名称        Git 状态    会话时长
+[Opus 4.6]  my-project  git:(main* ↑2)  1h 23m
+ ^^^^^^^^^   ^^^^^^^^^^      ^^^^^^^^^   ^^^^^^
+ 模型         项目名称        Git 状态    会话时长
 ```
+
+- **模型** — Claude Code 提供的模型显示名称（如 `Sonnet 4.6`、`Opus 4.6`、`Haiku 4.5`）
+- **项目名称** — 当前工作目录名
+- **Git 状态** — 分支名、脏标记（`*`）、领先（`↑N` 绿色）/ 落后（`↓N` 红色）上游
+- **会话时长** — 会话启动以来的经过时间，暗色显示
 
 ### 第二行 — 资源使用
 
@@ -28,11 +119,9 @@ ctx █████░░░░░ 53%  │  5h ████░░|░░░░ 
 上下文窗口              5 小时配额                       7 天配额
 ```
 
-## 功能详解
-
 ### 上下文窗口 (`ctx`)
 
-以 10 格进度条显示上下文窗口使用率。
+10 格进度条显示上下文窗口使用率。
 
 | 颜色 | 阈值 | 含义 |
 |------|------|------|
@@ -48,11 +137,9 @@ ctx █████████░ 92% (in:120k c:65k)
                     输入 token  缓存 token（创建 + 读取）
 ```
 
-token 数量以 `k`（千）或 `M`（百万）为单位显示。
-
 ### 速率限制配额 (`5h` / `7d`)
 
-显示 5 小时和 7 天速率限制窗口的使用情况。每个段包含：
+每个配额段包含进度条、百分比和后缀信息：
 
 #### 进度条
 
@@ -80,7 +167,7 @@ token 数量以 `k`（千）或 `M`（百万）为单位显示。
 
 - **使用率 `%`** — 当前配额消耗百分比
 - **`!`** — 当使用率超过配速 5% 以上时追加（超速状态）
-- **`/p14.05%`** — 配速位置，即时间窗口已过比例。仅在超速时显示，用于展示使用率与预期进度之间的差距
+- **`/p14.05%`** — 配速位置，即时间窗口已过比例。仅在超速时显示
 
 #### 后缀：重置时间、预计耗尽、恢复时长
 
@@ -105,7 +192,7 @@ token 数量以 `k`（千）或 `M`（百万）为单位显示。
 | 使用率 `75–90%` 或超速（`!`） | 黄色 |
 | 使用率 `≥ 90%` | 红色 |
 
-#### 完整示例
+### 完整示例
 
 **正常状态 — 配速内**
 
@@ -159,42 +246,6 @@ token 数量以 `k`（千）或 `M`（百万）为单位显示。
 
 > **核心概念**：配速标记 `|` 代表"基于已过时间，你*应该*在的位置"。如果填充块 `█` 超过了 `|`，说明你超前于配速（过度消耗）。两者距离越远，配额消耗越激进。
 
-### Git 状态
-
-```
-git:(main* ↑2 ↓1)
-     ^^^^^ ^^  ^^
-     分支名  领先  落后
-      * = 有未提交的更改
-```
-
-- **分支名** — 当前分支
-- **`*`** — 脏标记，存在未提交更改时显示
-- **`↑N`**（绿色） — 领先上游 N 个提交
-- **`↓N`**（红色） — 落后上游 N 个提交
-- 未配置上游时，领先/落后信息静默省略
-
-### 会话时长
-
-```
-1h 23m
-```
-
-根据 transcript 文件的创建时间计算。以暗色文本显示在第一行末尾。
-
-- `< 1 分钟` → `0m`
-- `< 1 小时` → `15m`
-- `≥ 1 小时` → `1h 23m`
-
-### 模型与订阅
-
-```
-[Opus 4.6 | Max]
-```
-
-- **模型** — Claude Code 显示名称（如 `Sonnet 4.6`、`Opus 4.6`、`Haiku 4.5`）
-- **订阅** — 来自 `~/.claude/.credentials.json` 的订阅类型（Max、Pro、Team）。不可用时省略
-
 ## 配置
 
 可选配置文件位于 `~/.claude/claude-lifeline/config.toml`。所有选项默认为 `true`。
@@ -226,52 +277,6 @@ separator = true   # 状态栏上方分割线
 - **~3MB** 发布二进制（LTO + strip）
 - Git 命令、用量数据获取通过 `tokio::join!` 并发执行
 - 所有二进制均为完全静态链接（Linux 使用 musl，Windows 使用静态 CRT）
-
-## 安装
-
-### macOS / Linux
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.sh | bash
-```
-
-### Windows (PowerShell)
-
-```powershell
-irm https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.ps1 | iex
-```
-
-### 从源码构建
-
-```bash
-git clone https://github.com/xjoker/claude-lifeline.git
-cd claude-lifeline
-cargo build --release
-mkdir -p ~/.claude/bin
-cp target/release/claude-lifeline ~/.claude/bin/
-```
-
-然后在 `~/.claude/settings.json` 中添加：
-
-```json
-{
-  "statusLine": {
-    "type": "command",
-    "command": "~/.claude/bin/claude-lifeline"
-  }
-}
-```
-
-重启 Claude Code 即可生效。
-
-## 卸载
-
-```bash
-rm ~/.claude/bin/claude-lifeline                        # macOS / Linux
-del %USERPROFILE%\.claude\bin\claude-lifeline.exe       # Windows
-```
-
-从 `~/.claude/settings.json` 中移除 `statusLine` 部分。
 
 ## 支持平台
 

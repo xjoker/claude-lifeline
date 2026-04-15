@@ -1,24 +1,115 @@
 # claude-lifeline
 
-A fast Rust status line for [Claude Code](https://docs.anthropic.com/en/docs/claude-code), replacing the default status bar with a feature-rich, sub-50ms native binary.
+A fast Rust status line for [Claude Code](https://docs.anthropic.com/en/docs/claude-code), replacing the default status bar with a feature-rich, sub-50ms native binary. Supports **macOS**, **Linux**, and **Windows**.
 
 **[中文文档](docs/README_CN.md)**
 
 ## Preview
 
+![claude-lifeline screenshot](docs/img.png)
+
 ```
 ─────────────────────────────────────────
-[Opus 4.6 | Max]  my-project  git:(main* ↑2)  1h 23m
+[Opus 4.6]  my-project  git:(main* ↑2)  1h 23m
 ctx █████░░░░░ 53%  │  5h ████░░|░░░░ 34%(1h 23m)  │  7d ██|█░░░░░░░ 22%!/p14.05%(6d 0h ETA 4/19 08:18 wait 13h)
 ```
+
+## Why claude-lifeline?
+
+- **Pace awareness** — know if you're burning quota too fast *before* you hit the limit, with visual pace markers and over-pace alerts
+- **Depletion prediction** — see exactly when your quota will run out and how long to pause to get back on track
+- **Zero dependencies** — fully static binaries for all platforms, no runtime needed
+- **Fast** — ~30ms response, well under Claude Code's 500ms budget
+- **Configurable** — toggle any segment on/off via TOML config
+
+## Install
+
+Requires **Claude Code ≥ 2.1.80** (for `stdin.rate_limits` data).
+
+### Let Claude install it for you (Recommended)
+
+If you're already using Claude Code, just tell Claude:
+
+> Install claude-lifeline by running: `curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.sh | bash`
+
+On Windows, tell Claude:
+
+> Install claude-lifeline by running: `irm https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.ps1 | iex`
+
+Claude will run the installer, configure `settings.json`, and restart is all that's needed.
+
+### Manual install
+
+**macOS / Linux:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.sh | bash
+```
+
+**Windows (PowerShell):**
+
+```powershell
+irm https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.ps1 | iex
+```
+
+Restart Claude Code after installation.
+
+### Build from source
+
+```bash
+git clone https://github.com/xjoker/claude-lifeline.git
+cd claude-lifeline
+cargo build --release
+mkdir -p ~/.claude/bin
+cp target/release/claude-lifeline ~/.claude/bin/
+```
+
+Then add to `~/.claude/settings.json`:
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "~/.claude/bin/claude-lifeline"
+  }
+}
+```
+
+### Upgrade
+
+```bash
+# macOS / Linux
+curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.sh | bash -s upgrade
+```
+
+Windows: re-run the install command — it auto-detects and skips if already up to date.
+
+### Uninstall
+
+```bash
+# macOS / Linux
+curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.sh | bash -s uninstall
+```
+
+```powershell
+# Windows (PowerShell)
+& { $env:ACTION='uninstall'; irm https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.ps1 | iex }
+```
+
+## Features
 
 ### Line 1 — Session Info
 
 ```
-[Opus 4.6 | Max]  my-project  git:(main* ↑2)  1h 23m
- ^^^^^^^^^^^       ^^^^^^^^^^      ^^^^^^^^^   ^^^^^^
- Model & Plan      Project name   Git status   Session duration
+[Opus 4.6]  my-project  git:(main* ↑2)  1h 23m
+ ^^^^^^^^^   ^^^^^^^^^^      ^^^^^^^^^   ^^^^^^
+ Model       Project name   Git status   Session duration
 ```
+
+- **Model** — display name from Claude Code (e.g., `Sonnet 4.6`, `Opus 4.6`, `Haiku 4.5`)
+- **Project name** — current working directory name
+- **Git status** — branch, dirty flag (`*`), ahead (`↑N` green) / behind (`↓N` red) upstream
+- **Session duration** — elapsed time since session start, shown in dim text
 
 ### Line 2 — Resource Usage
 
@@ -28,11 +119,9 @@ ctx █████░░░░░ 53%  │  5h ████░░|░░░░ 
 Context window         5-hour quota                     7-day quota
 ```
 
-## Features
-
 ### Context Window (`ctx`)
 
-Displays context window usage as a 10-block progress bar.
+10-block progress bar showing context window usage.
 
 | Color | Threshold | Meaning |
 |-------|-----------|---------|
@@ -48,11 +137,9 @@ ctx █████████░ 92% (in:120k c:65k)
                     Input    Cache (creation + read)
 ```
 
-Token counts are formatted as `k` (thousands) or `M` (millions).
-
 ### Rate Limit Quotas (`5h` / `7d`)
 
-Displays usage for the 5-hour and 7-day rate limit windows. Each segment contains:
+Each quota segment contains a progress bar, percentage, and suffix info:
 
 #### Progress Bar
 
@@ -80,7 +167,7 @@ Usage  Pace position (only shown when over-pace)
 
 - **Usage `%`** — current quota consumption
 - **`!`** — appended when usage exceeds pace by more than 5% (over-pace)
-- **`/p14.05%`** — pace position, i.e., how much time has elapsed relative to the total window. Only displayed when over-pace, to show the gap between usage and expected position
+- **`/p14.05%`** — pace position, i.e., how much time has elapsed relative to the total window. Only displayed when over-pace
 
 #### Suffix: Reset, ETA, Recovery
 
@@ -105,7 +192,7 @@ Usage  Pace position (only shown when over-pace)
 | Usage `75–90%` or over-pace (`!`) | Yellow |
 | Usage `≥ 90%` | Red |
 
-#### Complete Examples
+### Complete Examples
 
 **Normal — within pace**
 
@@ -159,42 +246,6 @@ Usage  Pace position (only shown when over-pace)
 
 > **Key concept**: The pace marker `|` represents "where you *should* be" based on elapsed time. If filled blocks `█` extend past `|`, you're ahead of pace (over-consuming). The further apart they are, the more aggressively you're burning quota.
 
-### Git Status
-
-```
-git:(main* ↑2 ↓1)
-     ^^^^^ ^^  ^^
-     Branch  Ahead  Behind
-      * = uncommitted changes
-```
-
-- **Branch name** — current branch
-- **`*`** — dirty flag, shown when there are uncommitted changes
-- **`↑N`** (green) — N commits ahead of upstream
-- **`↓N`** (red) — N commits behind upstream
-- When no upstream is configured, ahead/behind is silently omitted
-
-### Session Duration
-
-```
-1h 23m
-```
-
-Calculated from the transcript file's creation time. Displayed at the end of line 1 in dim text.
-
-- `< 1 min` → `0m`
-- `< 1 hour` → `15m`
-- `≥ 1 hour` → `1h 23m`
-
-### Model & Plan
-
-```
-[Opus 4.6 | Max]
-```
-
-- **Model** — display name from Claude Code (e.g., `Sonnet 4.6`, `Opus 4.6`, `Haiku 4.5`)
-- **Plan** — subscription type from `~/.claude/.credentials.json` (Max, Pro, Team). Omitted if unavailable
-
 ## Configuration
 
 Optional config file at `~/.claude/claude-lifeline/config.toml`. All options default to `true`.
@@ -226,52 +277,6 @@ Rate limit data is resolved in priority order:
 - **~3MB** release binary (LTO + strip)
 - Git commands, usage data fetch run concurrently via `tokio::join!`
 - All binaries are fully static (musl on Linux, static CRT on Windows)
-
-## Install
-
-### macOS / Linux
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.sh | bash
-```
-
-### Windows (PowerShell)
-
-```powershell
-irm https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.ps1 | iex
-```
-
-### Build from source
-
-```bash
-git clone https://github.com/xjoker/claude-lifeline.git
-cd claude-lifeline
-cargo build --release
-mkdir -p ~/.claude/bin
-cp target/release/claude-lifeline ~/.claude/bin/
-```
-
-Then add to `~/.claude/settings.json`:
-
-```json
-{
-  "statusLine": {
-    "type": "command",
-    "command": "~/.claude/bin/claude-lifeline"
-  }
-}
-```
-
-Restart Claude Code to activate.
-
-## Uninstall
-
-```bash
-rm ~/.claude/bin/claude-lifeline                        # macOS / Linux
-del %USERPROFILE%\.claude\bin\claude-lifeline.exe       # Windows
-```
-
-Remove the `statusLine` section from `~/.claude/settings.json`.
 
 ## Supported Platforms
 

@@ -36,12 +36,8 @@ pub fn render(ctx: &RenderContext) {
     // ── 行1 ──
     let model_name = crate::input::get_model_name(&ctx.stdin);
 
-    // [Model | Plan] — 青色
-    let model_section = if let Some(plan) = &ctx.usage.plan_name {
-        format!("{CYAN}[{model_name} | {plan}]{RESET}")
-    } else {
-        format!("{CYAN}[{model_name}]{RESET}")
-    };
+    // [Model] — 青色
+    let model_section = format!("{CYAN}[{model_name}]{RESET}");
 
     // 项目名 — 黄色
     let project_name = ctx
