@@ -14,8 +14,8 @@ ARCH=$(uname -m)
 case "$OS-$ARCH" in
   darwin-arm64)    TARGET="aarch64-apple-darwin" ;;
   darwin-x86_64)   TARGET="x86_64-apple-darwin" ;;
-  linux-x86_64)    TARGET="x86_64-unknown-linux-gnu" ;;
-  linux-aarch64)   TARGET="aarch64-unknown-linux-gnu" ;;
+  linux-x86_64)    TARGET="x86_64-unknown-linux-musl" ;;
+  linux-aarch64)   TARGET="aarch64-unknown-linux-musl" ;;
   *)
     echo "Error: unsupported platform $OS-$ARCH"
     exit 1

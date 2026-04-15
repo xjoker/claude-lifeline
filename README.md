@@ -133,8 +133,8 @@ Remove the `statusLine` section from `~/.claude/settings.json`.
 |----------|-------------|--------|
 | macOS | Apple Silicon (arm64) | `claude-lifeline-aarch64-apple-darwin` |
 | macOS | Intel (x86_64) | `claude-lifeline-x86_64-apple-darwin` |
-| Linux | x86_64 | `claude-lifeline-x86_64-unknown-linux-gnu` |
-| Linux | ARM64 | `claude-lifeline-aarch64-unknown-linux-gnu` |
+| Linux | x86_64 | `claude-lifeline-x86_64-unknown-linux-musl` (static) |
+| Linux | ARM64 | `claude-lifeline-aarch64-unknown-linux-musl` (static) |
 | Windows | x86_64 | `claude-lifeline-x86_64-pc-windows-msvc.exe` |
 
 ## License
