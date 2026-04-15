@@ -15,7 +15,7 @@ jobs:
           # macOS (self-contained by default)
           - os: macos-14
             target: aarch64-apple-darwin
-          - os: macos-13
+          - os: macos-14
             target: x86_64-apple-darwin
           # Linux (musl = fully static, zero dependencies)
           - os: ubuntu-latest
