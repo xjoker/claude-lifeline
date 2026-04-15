@@ -54,7 +54,8 @@ pub struct RateLimits {
 #[derive(Debug, Deserialize)]
 pub struct RateLimitWindow {
     pub used_percentage: Option<f64>,
-    pub resets_at: Option<String>,
+    /// Unix 时间戳（数字）或 ISO 8601 字符串，两种格式均需支持
+    pub resets_at: Option<serde_json::Value>,
 }
 
 // ── 公共函数 ──

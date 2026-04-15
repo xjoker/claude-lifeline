@@ -69,6 +69,21 @@ struct ApiWindow {
     resets_at: Option<String>,
 }
 
+// ── 辅助：解析 resets_at（兼容 Unix 时间戳和 ISO 字符串） ──
+
+fn parse_resets_at(value: &serde_json::Value) -> Option<DateTime<Utc>> {
+    match value {
+        serde_json::Value::Number(n) => {
+            let ts = n.as_i64()?;
+            DateTime::from_timestamp(ts, 0)
+        }
+        serde_json::Value::String(s) => DateTime::parse_from_rfc3339(s)
+            .ok()
+            .map(|dt| dt.with_timezone(&Utc)),
+        _ => None,
+    }
+}
+
 // ── 常量 ──
 
 pub const WINDOW_5H_SECS: i64 = 5 * 3600;
@@ -84,19 +99,11 @@ pub async fn get_usage_data(rate_limits: Option<&RateLimits>) -> UsageData {
     if let Some(rl) = rate_limits {
         let five_hour = rl.five_hour.as_ref().map(|w| WindowUsage {
             used_percent: w.used_percentage.unwrap_or(0.0),
-            resets_at: w
-                .resets_at
-                .as_deref()
-                .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
-                .map(|dt| dt.with_timezone(&Utc)),
+            resets_at: w.resets_at.as_ref().and_then(parse_resets_at),
         });
         let seven_day = rl.seven_day.as_ref().map(|w| WindowUsage {
             used_percent: w.used_percentage.unwrap_or(0.0),
-            resets_at: w
-                .resets_at
-                .as_deref()
-                .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
-                .map(|dt| dt.with_timezone(&Utc)),
+            resets_at: w.resets_at.as_ref().and_then(parse_resets_at),
         });
 
         let has_data = five_hour.is_some() || seven_day.is_some();

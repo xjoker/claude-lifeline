@@ -81,23 +81,7 @@ pub fn render(ctx: &RenderContext) {
         let pace_pct = pace.as_ref().map(|p| p.pace_percent);
         let bar = render_bar_with_pace(five_hour.used_percent, pace_pct, 10, color);
 
-        let mut suffix = String::new();
-        if let Some(resets_at) = &five_hour.resets_at {
-            let reset_str = crate::usage::format_reset_time(resets_at);
-            suffix.push_str(&format!("({reset_str}"));
-            if let Some(ref p) = pace {
-                match p.direction {
-                    crate::usage::PaceDirection::Over => {
-                        suffix.push_str(&format!(" {RED}↑{RESET}"));
-                    }
-                    crate::usage::PaceDirection::Under => {
-                        suffix.push_str(&format!(" {GREEN}↓{RESET}"));
-                    }
-                    crate::usage::PaceDirection::Normal => {}
-                }
-            }
-            suffix.push(')');
-        }
+        let suffix = format_quota_suffix(&five_hour.resets_at, &pace);
 
         segments.push(format!(
             "5h {bar} {color}{:.0}%{RESET}{suffix}",
@@ -112,23 +96,7 @@ pub fn render(ctx: &RenderContext) {
         let pace_pct = pace.as_ref().map(|p| p.pace_percent);
         let bar = render_bar_with_pace(seven_day.used_percent, pace_pct, 10, color);
 
-        let mut suffix = String::new();
-        if let Some(resets_at) = &seven_day.resets_at {
-            let reset_str = crate::usage::format_reset_time(resets_at);
-            suffix.push_str(&format!("({reset_str}"));
-            if let Some(ref p) = pace {
-                match p.direction {
-                    crate::usage::PaceDirection::Over => {
-                        suffix.push_str(&format!(" {RED}↑{RESET}"));
-                    }
-                    crate::usage::PaceDirection::Under => {
-                        suffix.push_str(&format!(" {GREEN}↓{RESET}"));
-                    }
-                    crate::usage::PaceDirection::Normal => {}
-                }
-            }
-            suffix.push(')');
-        }
+        let suffix = format_quota_suffix(&seven_day.resets_at, &pace);
 
         segments.push(format!(
             "7d {bar} {color}{:.0}%{RESET}{suffix}",
@@ -144,6 +112,37 @@ pub fn render(ctx: &RenderContext) {
 }
 
 // ── 私有辅助函数 ──
+
+/// 格式化 quota 后缀：(重置时间 方向箭头)
+fn format_quota_suffix(
+    resets_at: &Option<chrono::DateTime<chrono::Utc>>,
+    pace: &Option<crate::usage::PaceInfo>,
+) -> String {
+    let reset_str = resets_at
+        .as_ref()
+        .map(crate::usage::format_reset_time)
+        .unwrap_or_default();
+
+    // 重置时间和方向箭头都没有时，不输出后缀
+    let direction_str = pace.as_ref().map(|p| match p.direction {
+        crate::usage::PaceDirection::Over => format!("{RED}↑{RESET}"),
+        crate::usage::PaceDirection::Under => format!("{GREEN}↓{RESET}"),
+        crate::usage::PaceDirection::Normal => String::new(),
+    }).unwrap_or_default();
+
+    if reset_str.is_empty() && direction_str.is_empty() {
+        return String::new();
+    }
+
+    let mut parts = Vec::new();
+    if !reset_str.is_empty() {
+        parts.push(reset_str);
+    }
+    if !direction_str.is_empty() {
+        parts.push(direction_str);
+    }
+    format!("({})", parts.join(" "))
+}
 
 /// 渲染带配速标记的进度条
 fn render_bar_with_pace(used_pct: f64, pace_pct: Option<f64>, width: usize, color: &str) -> String {
