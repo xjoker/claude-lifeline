@@ -1,6 +1,6 @@
 [package]
 name = "claude-lifeline"
-version = "0.0.3"
+version = "0.0.4-dev"
 edition = "2021"
 description = "Claude Code status line — model, git, context, usage with pace markers"
 

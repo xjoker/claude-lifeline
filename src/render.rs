@@ -245,6 +245,8 @@ fn format_tokens(count: u64) -> String {
 }
 
 /// 渲染带配速标记的进度条（配速线插入而非替换，不吃掉填充块）
+///
+/// 同色连续字符批量输出，减少 ANSI 转义码开销（约 3x），改善 Windows 宽度截断问题
 fn render_bar_with_pace(used_pct: f64, pace_pct: Option<f64>, width: usize, color: &str) -> String {
     let used_pos = ((used_pct / 100.0) * width as f64).round() as usize;
     let used_pos = used_pos.min(width);
@@ -255,21 +257,50 @@ fn render_bar_with_pace(used_pct: f64, pace_pct: Option<f64>, width: usize, colo
     });
 
     let mut result = String::new();
+    let mut run_color: &str = "";
+    let mut run_chars = String::new();
+
+    // 将当前缓冲批量写入 result
+    macro_rules! flush_run {
+        () => {
+            if !run_chars.is_empty() {
+                result.push_str(run_color);
+                result.push_str(&run_chars);
+                result.push_str(RESET);
+                run_chars.clear();
+            }
+        };
+    }
 
     for i in 0..width {
-        // 在该位置前插入配速线
+        // 配速线：插入当前位置之前
         if Some(i) == pace_pos {
-            result.push_str(&format!("{BOLD_WHITE}|{RESET}"));
+            flush_run!();
+            result.push_str(BOLD_WHITE);
+            result.push('|');
+            result.push_str(RESET);
         }
-        if i < used_pos {
-            result.push_str(&format!("{color}█{RESET}"));
+
+        let (ch, ch_color): (char, &str) = if i < used_pos {
+            ('█', color)
         } else {
-            result.push_str(&format!("{DIM}░{RESET}"));
+            ('░', DIM)
+        };
+
+        // 颜色变化时先刷新缓冲
+        if ch_color != run_color {
+            flush_run!();
+            run_color = ch_color;
         }
+        run_chars.push(ch);
     }
+    flush_run!();
+
     // 配速线在末尾
     if pace_pos == Some(width) {
-        result.push_str(&format!("{BOLD_WHITE}|{RESET}"));
+        result.push_str(BOLD_WHITE);
+        result.push('|');
+        result.push_str(RESET);
     }
 
     result
