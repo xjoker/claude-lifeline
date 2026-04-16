@@ -2,6 +2,23 @@
 
 All notable changes to claude-lifeline will be documented in this file.
 
+## [0.0.3] - 2026-04-16
+
+### Added
+- **Auto-update detection** — checks GitHub releases once per 24h via background subprocess, shows `↑0.0.3` in status bar when a new version is available. Zero latency impact (file read only on hot path)
+- **macOS ad-hoc codesign** in CI — reduces Gatekeeper warnings
+
+### Changed
+- Over-pace alert triggers immediately when usage exceeds pace (no threshold)
+- Removed separator line (redundant with Claude Code's own divider)
+- Install scripts: use `jq` for JSON editing when available, fix trailing comma bugs
+- Install scripts: proper version comparison (`v` prefix stripped)
+- Cache invalidation: resets_at past expiry now triggers re-fetch
+
+### Fixed
+- install.ps1: create `settings.json` when file doesn't exist
+- Dead code warnings eliminated (warning-clean build)
+
 ## [0.0.1] - 2026-04-15
 
 ### Added

@@ -23,6 +23,7 @@ pub struct RenderContext {
     pub usage: UsageData,
     pub session_duration: Option<std::time::Duration>,
     pub config: Config,
+    pub update_hint: Option<String>,
 }
 
 // ── 公共函数 ──
@@ -152,8 +153,13 @@ pub fn render(ctx: &RenderContext) {
     let separator = format!("{DIM} │ {RESET}");
     let line2 = segments.join(&separator);
 
+    // 升级提示
+    let update_section = ctx.update_hint.as_ref()
+        .map(|v| format!("{separator}{YELLOW}↑{v}{RESET}"))
+        .unwrap_or_default();
+
     println!("{line1}");
-    println!("{line2}");
+    println!("{line2}{update_section}");
 }
 
 // ── 私有辅助函数 ──

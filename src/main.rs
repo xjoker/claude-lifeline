@@ -3,6 +3,7 @@ mod config;
 mod git;
 mod input;
 mod render;
+mod update;
 mod usage;
 
 #[tokio::main]
@@ -17,6 +18,12 @@ async fn run() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--version" || a == "-V") {
         println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+
+    // --check-update：后台子进程执行网络检查
+    if args.iter().any(|a| a == "--check-update") {
+        crate::update::do_update_check().await;
         return Ok(());
     }
 
@@ -50,8 +57,12 @@ async fn run() -> anyhow::Result<()> {
     // 5. 读取配置
     let config = crate::config::read_config();
 
-    // 6. 渲染输出
-    let ctx = crate::render::RenderContext { stdin, git, usage, session_duration, config };
+    // 6. 升级提示（纯文件读取，sub-ms）
+    let update_hint = crate::update::check_update_hint();
+    crate::update::ensure_cache_exists();
+
+    // 7. 渲染输出
+    let ctx = crate::render::RenderContext { stdin, git, usage, session_duration, config, update_hint };
     crate::render::render(&ctx);
 
     Ok(())
