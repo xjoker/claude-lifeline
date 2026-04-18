@@ -55,8 +55,49 @@ case "$ACTION" in
     echo "Done! Restart Claude Code to apply."
     exit 0
     ;;
+  dev)
+    # 本地源码构建 + 部署，供开发者验证未发布改动
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    if [ ! -f "$SCRIPT_DIR/Cargo.toml" ]; then
+      echo "Error: dev mode must be run from the repo root (Cargo.toml not found)"
+      exit 1
+    fi
+    command -v cargo >/dev/null 2>&1 || { echo "Error: cargo not found in PATH"; exit 1; }
+
+    echo "Building release binary from source..."
+    (cd "$SCRIPT_DIR" && cargo build --release)
+
+    BUILT="$SCRIPT_DIR/target/release/$BIN_NAME"
+    [ -x "$BUILT" ] || { echo "Error: build output missing: $BUILT"; exit 1; }
+
+    mkdir -p "$INSTALL_DIR"
+    cp "$BUILT" "$INSTALL_DIR/$BIN_NAME"
+    chmod +x "$INSTALL_DIR/$BIN_NAME"
+
+    if [ "$(uname -s)" = "Darwin" ]; then
+      xattr -d com.apple.quarantine "$INSTALL_DIR/$BIN_NAME" 2>/dev/null || true
+    fi
+
+    echo "Installed dev build to $INSTALL_DIR/$BIN_NAME ($("$INSTALL_DIR/$BIN_NAME" --version 2>/dev/null || echo unknown))"
+
+    if [ -f "$SETTINGS" ]; then
+      if settings_has; then
+        echo "settings.json already configured"
+      else
+        settings_add
+      fi
+    else
+      mkdir -p "$(dirname "$SETTINGS")"
+      printf '{\n  "statusLine": {"type": "command", "command": "%s"}\n}\n' "$STATUS_LINE_CMD" > "$SETTINGS"
+      echo "Created $SETTINGS"
+    fi
+
+    echo ""
+    echo "Done! Restart Claude Code to see the dev build."
+    exit 0
+    ;;
   *)
-    echo "Usage: $0 [install|upgrade|uninstall]"
+    echo "Usage: $0 [install|upgrade|uninstall|dev]"
     exit 1
     ;;
 esac

@@ -76,9 +76,25 @@ irm https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.ps1 
 
 ### 从源码构建
 
+一键 dev 安装 — cargo 构建、部署到 `~/.claude/bin/`、自动合并 `settings.json`：
+
 ```bash
+# macOS / Linux
 git clone https://github.com/xjoker/claude-lifeline.git
 cd claude-lifeline
+bash install.sh dev
+```
+
+```powershell
+# Windows (PowerShell)
+git clone https://github.com/xjoker/claude-lifeline.git
+cd claude-lifeline
+$env:ACTION='dev'; .\install.ps1
+```
+
+或手动执行：
+
+```bash
 cargo build --release
 mkdir -p ~/.claude/bin
 cp target/release/claude-lifeline ~/.claude/bin/

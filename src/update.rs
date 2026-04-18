@@ -5,6 +5,12 @@ use std::path::PathBuf;
 const CHECK_INTERVAL_SECS: i64 = 24 * 3600;
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// 本地是否为 dev/预发布构建（版本号含 `-` 后缀，如 `0.0.4-dev`）。
+/// dev 构建由开发者自行管理版本，不参与自动更新提示。
+fn is_dev_build() -> bool {
+    CURRENT_VERSION.contains('-')
+}
+
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct UpdateCache {
     latest_version: String,
@@ -23,6 +29,10 @@ fn cache_path() -> PathBuf {
 
 /// 读取本地缓存，返回新版本号（如果有更新）。纯文件读取，sub-ms。
 pub fn check_update_hint() -> Option<String> {
+    if is_dev_build() {
+        return None;
+    }
+
     let path = cache_path();
     let content = std::fs::read_to_string(&path).ok()?;
     let cache: UpdateCache = serde_json::from_str(&content).ok()?;
@@ -32,6 +42,11 @@ pub fn check_update_hint() -> Option<String> {
     // 缓存过期 → 触发后台检查
     if now - cache.checked_at >= CHECK_INTERVAL_SECS {
         spawn_background_check();
+    }
+
+    // 忽略缓存里的 dev/预发布标签，正式版只提示正式版
+    if cache.latest_version.contains('-') {
+        return None;
     }
 
     // 比较版本
@@ -44,6 +59,9 @@ pub fn check_update_hint() -> Option<String> {
 
 /// 首次无缓存时也触发后台检查
 pub fn ensure_cache_exists() {
+    if is_dev_build() {
+        return;
+    }
     let path = cache_path();
     if !path.exists() {
         spawn_background_check();

@@ -2,6 +2,7 @@
 # Usage:
 #   Install/Upgrade: irm https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.ps1 | iex
 #   Uninstall:       & { $env:ACTION='uninstall'; irm https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.ps1 | iex }
+#   Dev (from repo):  $env:ACTION='dev'; .\install.ps1
 
 $ErrorActionPreference = "Stop"
 
@@ -30,6 +31,64 @@ if ($Action -eq "uninstall") {
         }
     }
     Write-Host "Done! Restart Claude Code to apply."
+    exit 0
+}
+
+# ── Dev: local source build ──
+
+if ($Action -eq "dev") {
+    $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+    if (-not (Test-Path "$ScriptDir\Cargo.toml")) {
+        Write-Error "dev mode must be run from the repo root (Cargo.toml not found)"
+        exit 1
+    }
+    if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
+        Write-Error "cargo not found in PATH"
+        exit 1
+    }
+
+    Write-Host "Building release binary from source..."
+    Push-Location $ScriptDir
+    try { cargo build --release } finally { Pop-Location }
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+    $Built = "$ScriptDir\target\release\$BinName"
+    if (-not (Test-Path $Built)) {
+        Write-Error "build output missing: $Built"
+        exit 1
+    }
+
+    New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+    Copy-Item $Built "$InstallDir\$BinName" -Force
+
+    $Version = & "$InstallDir\$BinName" --version 2>$null
+    Write-Host "Installed dev build to $InstallDir\$BinName ($Version)"
+
+    if (Test-Path $Settings) {
+        $json = Get-Content $Settings -Raw | ConvertFrom-Json
+        $current = ""
+        if ($json.statusLine -and $json.statusLine.command) {
+            $current = $json.statusLine.command
+        }
+        if ($current -eq "~/.claude/bin/claude-lifeline") {
+            Write-Host "settings.json already configured"
+        } else {
+            Copy-Item $Settings "$Settings.bak"
+            $json | Add-Member -Force -MemberType NoteProperty -Name "statusLine" -Value @{
+                type = "command"
+                command = "~/.claude/bin/claude-lifeline"
+            }
+            $json | ConvertTo-Json -Depth 10 | Set-Content $Settings -Encoding UTF8
+            Write-Host "Updated settings.json (backup: settings.json.bak)"
+        }
+    } else {
+        New-Item -ItemType Directory -Force -Path (Split-Path $Settings) | Out-Null
+        @{statusLine = @{type = "command"; command = "~/.claude/bin/claude-lifeline"}} | ConvertTo-Json -Depth 10 | Set-Content $Settings -Encoding UTF8
+        Write-Host "Created $Settings"
+    }
+
+    Write-Host ""
+    Write-Host "Done! Restart Claude Code to see the dev build."
     exit 0
 }
 

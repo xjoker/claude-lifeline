@@ -76,9 +76,25 @@ Restart Claude Code after installation.
 
 ### Build from source
 
+One-shot dev install — builds with cargo, deploys to `~/.claude/bin/`, and merges `settings.json`:
+
 ```bash
+# macOS / Linux
 git clone https://github.com/xjoker/claude-lifeline.git
 cd claude-lifeline
+bash install.sh dev
+```
+
+```powershell
+# Windows (PowerShell)
+git clone https://github.com/xjoker/claude-lifeline.git
+cd claude-lifeline
+$env:ACTION='dev'; .\install.ps1
+```
+
+Or manual:
+
+```bash
 cargo build --release
 mkdir -p ~/.claude/bin
 cp target/release/claude-lifeline ~/.claude/bin/
