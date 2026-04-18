@@ -284,13 +284,17 @@ Usage  Pace position (only shown when over-pace)
 
 ## Configuration
 
-Optional config file at `~/.claude/claude-lifeline/config.toml`. All options default to `true`.
+Optional config file at `~/.claude/claude-lifeline/config.toml`.
 
 ```toml
 [display]
 context = true     # Context window segment
 five_hour = true   # 5-hour quota segment
 seven_day = true   # 7-day quota segment
+layout = "auto"    # Second-line layout: auto | single | multi
+                   #   auto   — detect terminal width; wrap per-segment if too narrow
+                   #   single — always single line (may be truncated)
+                   #   multi  — always one segment per line
 ```
 
 See [config.example.toml](config.example.toml) for reference.

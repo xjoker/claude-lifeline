@@ -6,3 +6,7 @@
 context = true     # context window 段
 five_hour = true   # 5h quota 段
 seven_day = true   # 7d quota 段
+layout = "auto"    # 第二行布局: auto | single | multi
+                   #   auto   — 按终端宽度自动选择（窄则每段独占一行）
+                   #   single — 强制单行（可能被终端截断）
+                   #   multi  — 强制每段独占一行

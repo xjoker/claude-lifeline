@@ -284,13 +284,17 @@ ctx █████████░ 92% (in:120k c:65k)
 
 ## 配置
 
-可选配置文件位于 `~/.claude/claude-lifeline/config.toml`。所有选项默认为 `true`。
+可选配置文件 `~/.claude/claude-lifeline/config.toml`：
 
 ```toml
 [display]
-context = true     # 上下文窗口段
-five_hour = true   # 5 小时配额段
-seven_day = true   # 7 天配额段
+context = true     # context window 段
+five_hour = true   # 5h quota 段
+seven_day = true   # 7d quota 段
+layout = "auto"    # 第二行布局: auto | single | multi
+                   #   auto   — 按终端宽度自动选择（窄则每段独占一行）
+                   #   single — 强制单行（可能被截断）
+                   #   multi  — 强制每段独占一行
 ```
 
 参见 [config.example.toml](../config.example.toml) 获取参考。

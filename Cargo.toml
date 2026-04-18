@@ -16,6 +16,7 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 anyhow = "1"
 toml = "0.8"
 chrono = { version = "0.4", features = ["serde"] }
+terminal_size = "0.4"
 
 [profile.release]
 opt-level = 3

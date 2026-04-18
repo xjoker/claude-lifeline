@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::config::{Config, Layout};
 use crate::git::GitInfo;
 use crate::input::StdinData;
 use crate::usage::UsageData;
@@ -151,15 +151,105 @@ pub fn render(ctx: &RenderContext) {
     }
 
     let separator = format!("{DIM} │ {RESET}");
-    let line2 = segments.join(&separator);
+    let single_line = segments.join(&separator);
 
-    // 升级提示
-    let update_section = ctx.update_hint.as_ref()
+    // 升级提示：单行附在末尾，多行时独占一行
+    let update_inline = ctx.update_hint.as_ref()
         .map(|v| format!("{separator}{YELLOW}↑{v}{RESET}"))
         .unwrap_or_default();
+    let update_standalone = ctx.update_hint.as_ref()
+        .map(|v| format!("{YELLOW}↑{v}{RESET}"))
+        .unwrap_or_default();
+
+    let use_multi = match ctx.config.display.layout {
+        Layout::Multi => true,
+        Layout::Single => false,
+        Layout::Auto => {
+            // 优先让终端自己换行处理长行 —— 只有在 line2 会超过 2 物理行时才拆分为每段独占一行
+            let width = detect_terminal_width();
+            let visual_len = visible_width(&format!("{single_line}{update_inline}"));
+            visual_len > width * 2
+        }
+    };
 
     println!("{line1}");
-    println!("{line2}{update_section}");
+    if use_multi {
+        for seg in &segments {
+            println!("{seg}");
+        }
+        if !update_standalone.is_empty() {
+            println!("{update_standalone}");
+        }
+    } else {
+        println!("{single_line}{update_inline}");
+    }
+}
+
+/// 探测终端列宽，COLUMNS 环境变量 → /dev/tty → 120 兜底
+///
+/// COLUMNS 优先，方便 Claude Code / 用户通过环境变量显式覆盖
+fn detect_terminal_width() -> usize {
+    if let Ok(cols) = std::env::var("COLUMNS") {
+        if let Ok(w) = cols.parse::<usize>() {
+            if w > 0 {
+                return w;
+            }
+        }
+    }
+    if let Some((terminal_size::Width(w), _)) = terminal_size::terminal_size() {
+        if w > 0 {
+            return w as usize;
+        }
+    }
+    120
+}
+
+/// 剥离 ANSI 转义码后按字符数量估算视觉宽度（窄字符按 1 计，CJK 等宽字符按 2 计）
+fn visible_width(s: &str) -> usize {
+    let mut width = 0usize;
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            // 跳过 ESC [ ... <final byte in 0x40..=0x7e>
+            if let Some('[') = chars.next() {
+                for c2 in chars.by_ref() {
+                    if ('\x40'..='\x7e').contains(&c2) {
+                        break;
+                    }
+                }
+            }
+            continue;
+        }
+        width += char_width(c);
+    }
+    width
+}
+
+/// 粗略的字符宽度估算：CJK/全角符号算 2 列，其他算 1 列
+fn char_width(c: char) -> usize {
+    if c.is_control() {
+        return 0;
+    }
+    let cp = c as u32;
+    // 覆盖常见 CJK + 全角符号 + emoji BMP 段，够状态栏用
+    let wide = matches!(cp,
+        0x1100..=0x115F |   // Hangul Jamo
+        0x2E80..=0x303E |   // CJK Radicals / Kangxi
+        0x3041..=0x33FF |   // Hiragana/Katakana/CJK Compat
+        0x3400..=0x4DBF |   // CJK Ext A
+        0x4E00..=0x9FFF |   // CJK Unified
+        0xA000..=0xA4CF |   // Yi
+        0xAC00..=0xD7A3 |   // Hangul Syllables
+        0xF900..=0xFAFF |   // CJK Compat Ideographs
+        0xFE30..=0xFE4F |   // CJK Compat Forms
+        0xFF00..=0xFF60 |   // Fullwidth Forms
+        0xFFE0..=0xFFE6 |
+        0x1F300..=0x1F64F | // Emoji
+        0x1F900..=0x1F9FF |
+        0x20000..=0x2FFFD | // CJK Ext B-F
+        0x30000..=0x3FFFD
+    );
+    if wide { 2 } else { 1 }
 }
 
 // ── 私有辅助函数 ──

@@ -18,6 +18,21 @@ pub struct DisplayConfig {
     /// 显示 7d quota 段
     #[serde(default = "yes")]
     pub seven_day: bool,
+    /// 第二行布局：auto 按终端宽度自动拆分，single 强制单行，multi 强制每段独占一行
+    #[serde(default = "Layout::default")]
+    pub layout: Layout,
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Layout {
+    Auto,
+    Single,
+    Multi,
+}
+
+impl Layout {
+    fn default() -> Self { Self::Auto }
 }
 
 fn yes() -> bool { true }
@@ -34,6 +49,7 @@ impl Default for DisplayConfig {
             context: true,
             five_hour: true,
             seven_day: true,
+            layout: Layout::Auto,
         }
     }
 }
