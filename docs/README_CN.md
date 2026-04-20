@@ -291,10 +291,13 @@ ctx █████████░ 92% (in:120k c:65k)
 context = true     # context window 段
 five_hour = true   # 5h quota 段
 seven_day = true   # 7d quota 段
-layout = "auto"    # 第二行布局: auto | single | multi
+layout = "auto"    # 布局: auto | single | multi | mini
                    #   auto   — 按终端宽度自动选择（窄则每段独占一行）
                    #   single — 强制单行（可能被截断）
                    #   multi  — 强制每段独占一行
+                   #   mini   — 极简色块单行：模型/项目/git/ctx/5h/7d 全压缩
+                   #            ctx <60 绿 / <70 黄 / >=70 红
+                   #            quota 超速 或 >=75 黄, >=90 红, 否则蓝
 ```
 
 参见 [config.example.toml](../config.example.toml) 获取参考。

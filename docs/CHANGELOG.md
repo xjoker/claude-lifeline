@@ -2,6 +2,28 @@
 
 All notable changes to claude-lifeline will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **Mini layout** (`layout = "mini"`) — single-line colored-block bar with everything
+  inline: `model · project · git · ctx N% · U/P% 5h · U/P% 7d`. Each segment is a
+  16-color ANSI block (model=magenta, project=cyan, git=yellow, ctx green/yellow/red,
+  quota blue/yellow/red), separated by a 1-column gap so adjacent same-color blocks
+  stay distinguishable. ETA appears only on over-pace segments; reset/wait/token-detail
+  dropped. Width-aware: single-line → identity+metrics 2-line → 1-block-per-line.
+  Long project/branch names truncated to 16 columns with ASCII `..` ellipsis.
+
+### Changed
+- Context color thresholds unified to `<60 green / <70 yellow / >=70 red` (was
+  `<70 / <85 / >=85`). Applies to both standard and mini layouts.
+- Mini layout uses pinned 256-color RGB values for all blocks (model=99 violet,
+  project=73 cadet, git=209 orange, ctx green/gold/red, quota sky-blue/gold/red),
+  with `fg=232` near-black text. Bypasses terminal theme palette mapping so blocks
+  render the same RGB on Windows Terminal, iTerm2, Alacritty, Kitty, gnome-terminal,
+  etc. Only Win10 legacy ConHost (cmd.exe) lacks 256-color support.
+  Characters limited to ASCII + Box-Drawing/Block-Elements/Arrows that ship with
+  default monospace fonts on all three platforms.
+
 ## [0.0.3] - 2026-04-16
 
 ### Added

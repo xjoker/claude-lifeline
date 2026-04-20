@@ -291,10 +291,13 @@ Optional config file at `~/.claude/claude-lifeline/config.toml`.
 context = true     # Context window segment
 five_hour = true   # 5-hour quota segment
 seven_day = true   # 7-day quota segment
-layout = "auto"    # Second-line layout: auto | single | multi
+layout = "auto"    # Layout: auto | single | multi | mini
                    #   auto   — detect terminal width; wrap per-segment if too narrow
                    #   single — always single line (may be truncated)
                    #   multi  — always one segment per line
+                   #   mini   — compact colored-block single line; everything inline,
+                   #            shows `model project git ctx N% U/P% 5h U/P% 7d`,
+                   #            block bg switches green/yellow/red on threshold/over-pace
 ```
 
 See [config.example.toml](config.example.toml) for reference.
