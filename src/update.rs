@@ -49,11 +49,29 @@ pub fn check_update_hint() -> Option<String> {
         return None;
     }
 
-    // 比较版本
-    if cache.latest_version != CURRENT_VERSION && cache.latest_version > CURRENT_VERSION.to_string() {
+    // 比较版本（按 SemVer 元组比较，避免 lex 比较把 0.0.10 当成早于 0.0.4）
+    if version_gt(&cache.latest_version, CURRENT_VERSION) {
         Some(cache.latest_version)
     } else {
         None
+    }
+}
+
+/// 解析 X.Y.Z（忽略 -suffix 部分）为 (u32, u32, u32) 元组
+fn parse_version(v: &str) -> Option<(u32, u32, u32)> {
+    let core = v.split('-').next()?; // 剥掉 -dev 等后缀
+    let mut parts = core.splitn(3, '.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    let patch = parts.next()?.parse().ok()?;
+    Some((major, minor, patch))
+}
+
+/// 严格大于：a > b。解析失败时回退为字符串比较
+fn version_gt(a: &str, b: &str) -> bool {
+    match (parse_version(a), parse_version(b)) {
+        (Some(va), Some(vb)) => va > vb,
+        _ => a > b,
     }
 }
 
@@ -81,11 +99,13 @@ fn spawn_background_check() {
 }
 
 /// 实际执行网络检查并写入缓存（由 --check-update 子进程调用）
+///
+/// 即使网络失败也会写入 cache（latest_version = 当前版本），避免 `ensure_cache_exists`
+/// 在离线时反复 spawn 子进程检查更新（每次主进程调用都触发，~300ms 一次）
 pub async fn do_update_check() {
-    let version = match fetch_latest_version().await {
-        Some(v) => v,
-        None => return,
-    };
+    let version = fetch_latest_version()
+        .await
+        .unwrap_or_else(|| CURRENT_VERSION.to_string());
 
     let cache = UpdateCache {
         latest_version: version,

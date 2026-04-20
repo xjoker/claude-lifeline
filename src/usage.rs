@@ -33,11 +33,11 @@ pub struct PaceInfo {
 
 #[derive(Debug, PartialEq)]
 pub enum PaceDirection {
-    /// used > pace + 10%
+    /// used > pace（无容差，配速线被超过即触发）
     Over,
-    /// used < pace - 10%
+    /// used < pace
     Under,
-    /// 正常范围
+    /// used == pace
     Normal,
 }
 
@@ -91,7 +91,6 @@ fn parse_resets_at(value: &serde_json::Value) -> Option<DateTime<Utc>> {
 pub const WINDOW_5H_SECS: i64 = 5 * 3600;
 pub const WINDOW_7D_SECS: i64 = 7 * 24 * 3600;
 const CACHE_TTL_SUCCESS: i64 = 5 * 60;
-const _CACHE_TTL_FAILURE: i64 = 15;
 
 // ── 公共函数 ──
 
@@ -228,7 +227,9 @@ pub fn format_reset_time(resets_at: &chrono::DateTime<chrono::Utc>) -> String {
 
 /// 缓存文件路径: ~/.claude/claude-lifeline/usage-cache.json
 fn cache_path() -> std::path::PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_else(|_| "/tmp".to_string());
     std::path::PathBuf::from(home)
         .join(".claude")
         .join("claude-lifeline")

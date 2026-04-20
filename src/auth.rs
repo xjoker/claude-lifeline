@@ -18,7 +18,9 @@ pub struct OAuthCredential {
 
 /// 读取凭证文件，返回 OAuth 信息。macOS 上若文件不存在则静默返回 None
 pub fn read_credentials() -> Option<OAuthCredential> {
-    let home = std::env::var("HOME").ok()?;
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .ok()?;
     let path = std::path::PathBuf::from(home)
         .join(".claude")
         .join(".credentials.json");
