@@ -2,6 +2,34 @@
 
 All notable changes to claude-lifeline will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **Configurable color thresholds** — new `[thresholds]` section in
+  `config.toml` lets you tune when ctx / quota blocks switch colour and
+  how strict the over-pace alert is. 5h and 7d quotas are tuned
+  independently; the 7d defaults are looser (yellow at 80% instead of
+  75%) to reflect the longer reset window. Fields: `ctx_yellow_at`,
+  `ctx_red_at`, `ctx_token_detail_at`, `five_hour_yellow_at`,
+  `five_hour_red_at`, `seven_day_yellow_at`, `seven_day_red_at`,
+  `pace_tolerance`. All fields are optional; invalid pairs
+  (yellow ≥ red or out of [0, 100]) fall back per-pair to defaults.
+  Mini and standard layouts share the same thresholds.
+
+### Changed
+- Mini layout now preserves the full `display_name` Claude Code
+  provides (e.g., `Opus 4.7`, `Sonnet 4.6`, `GLM-4.5`) instead of
+  collapsing it to a single keyword. The verbose `(1M context)` suffix
+  is compressed to ` 1M` so the block stays compact. Tier-colour
+  matcher uses `contains()` so versioned names (`Opus 4.7`) still
+  colour correctly; unrecognised models fall back to gray.
+- `install.sh mini` / `install.sh standard` (and their PowerShell
+  equivalents) now run the full install flow first — downloading the
+  latest binary when it's outdated or missing — before writing the
+  layout. Previously they only edited `config.toml`, which silently
+  no-op'd on machines whose binary predated the new layout value. The
+  download is skipped when the binary is already current.
+
 ## [0.0.4] - 2026-04-20
 
 ### Fixed

@@ -418,9 +418,28 @@ layout = "auto"    # 布局: auto | single | multi | mini
                    #   single — 强制单行（可能被截断）
                    #   multi  — 强制每段独占一行
                    #   mini   — 极简色块单行：模型/项目/git/ctx/5h/7d 全压缩
-                   #            ctx <60 绿 / <70 黄 / >=70 红
-                   #            quota 超速 或 >=75 黄, >=90 红, 否则蓝
+
+# 颜色切换阈值（可选，下列为默认值）
+# 校验：每对 yellow_at 必须 < red_at 且落在 [0, 100]；
+#       不合法的对回退到默认值，其他字段不受影响
+[thresholds]
+ctx_yellow_at       = 60.0   # ctx >= 该值 → 黄
+ctx_red_at          = 70.0   # ctx >= 该值 → 红
+ctx_token_detail_at = 85.0   # ctx >= 该值：standard 模式附加 (in:Xk c:Yk)
+
+# 5h / 7d quota 独立配置。7d 默认比 5h 更宽松（80 vs 75），
+# 因为 7d 窗口更长，中段消耗不紧迫
+five_hour_yellow_at = 75.0
+five_hour_red_at    = 90.0
+seven_day_yellow_at = 80.0
+seven_day_red_at    = 90.0
+
+# 超速容差（%）。pace_tolerance = 0 为严格模式，任何超过配速即触发 `!`。
+# 调大可以忽略短时突发，例如 pace_tolerance = 5.0 表示"超过配速 5% 才告警"
+pace_tolerance      = 0.0
 ```
+
+mini 与 standard 布局共用同一组 `[thresholds]`。mini 模式忽略 `ctx_token_detail_at`（因为它本身就不显示 token 明细）。
 
 参见 [config.example.toml](../config.example.toml) 获取参考。
 

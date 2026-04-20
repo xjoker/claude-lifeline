@@ -420,7 +420,32 @@ layout = "auto"    # Layout: auto | single | multi | mini
                    #   mini   — compact colored-block single line; everything inline,
                    #            shows `model project git ctx N% U/P% 5h U/P% 7d`,
                    #            block bg switches green/yellow/red on threshold/over-pace
+
+# Color thresholds (optional — defaults shown below)
+# Validation: each yellow_at must be < red_at and within [0, 100];
+#             invalid pairs fall back to the defaults below while other
+#             fields stay as-is.
+[thresholds]
+ctx_yellow_at       = 60.0   # ctx >= this → yellow
+ctx_red_at          = 70.0   # ctx >= this → red
+ctx_token_detail_at = 85.0   # ctx >= this → show (in:Xk c:Yk) in standard layout
+
+# 5h / 7d quotas are tuned independently. 7d defaults are looser than 5h
+# because the longer reset window makes mid-range usage less urgent.
+five_hour_yellow_at = 75.0
+five_hour_red_at    = 90.0
+seven_day_yellow_at = 80.0
+seven_day_red_at    = 90.0
+
+# Over-pace tolerance in percent. With pace_tolerance = 0 (strict), any
+# usage above the elapsed-time pace marker triggers the `!` alert. Raise
+# it to absorb short-lived bursts without flipping the whole segment
+# yellow — e.g., pace_tolerance = 5.0 means "only alert when we're >5%
+# ahead of pace".
+pace_tolerance      = 0.0
 ```
+
+Both mini and standard layouts read the same `[thresholds]` values. Mini ignores `ctx_token_detail_at` (it never renders the token breakdown).
 
 See [config.example.toml](config.example.toml) for reference.
 
