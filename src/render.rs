@@ -33,6 +33,11 @@ pub struct RenderContext {
 /// 行1: [Sonnet 4.6 | Max]  claude-lifeline  git:(main*)
 /// 行2: ctx ████████░░ 45%  │  5h ████|██░░ 65%(1h 45m ↑)  │  7d ██|░░░░░░ 22%(4d 3h ↓)
 pub fn render(ctx: &RenderContext) {
+    if ctx.config.display.layout == Layout::Mini {
+        render_mini(ctx);
+        return;
+    }
+
     // ── 行1 ──
     let model_name = crate::input::get_model_name(&ctx.stdin);
 
@@ -163,7 +168,7 @@ pub fn render(ctx: &RenderContext) {
 
     let use_multi = match ctx.config.display.layout {
         Layout::Multi => true,
-        Layout::Single => false,
+        Layout::Single | Layout::Mini => false,
         Layout::Auto => {
             // 优先让终端自己换行处理长行 —— 只有在 line2 会超过 2 物理行时才拆分为每段独占一行
             let width = detect_terminal_width();
@@ -398,9 +403,9 @@ fn render_bar_with_pace(used_pct: f64, pace_pct: Option<f64>, width: usize, colo
 
 /// Context 颜色阈值
 fn get_context_color(percent: f64) -> &'static str {
-    if percent < 70.0 {
+    if percent < 60.0 {
         GREEN
-    } else if percent < 85.0 {
+    } else if percent < 70.0 {
         YELLOW
     } else {
         RED
@@ -415,5 +420,242 @@ fn get_quota_color_with_pace(percent: f64, over_pace: bool) -> &'static str {
         YELLOW
     } else {
         BRIGHT_BLUE
+    }
+}
+
+// ── Mini 模式：极简色块单行 ──
+
+// 256-color 钉死 RGB —— 不依赖终端主题映射，所有现代终端（Windows Terminal / iTerm2 /
+// Alacritty / Kitty / Linux 终端）渲染一致；仅 Win10 老 cmd.exe ConHost 不支持
+// 文字统一 #080808（最深灰），所有 bg 选 mid-saturation 浅色，对比度有保证
+const FG_DARK: u8 = 232;
+// 模型强度渐变：旗舰 → 平衡 → 轻快
+const BG_MODEL_OPUS: u8 = 134;    // #af5fd7 紫红，旗舰
+const BG_MODEL_SONNET: u8 = 99;   // #8787ff 紫蓝，平衡
+const BG_MODEL_HAIKU: u8 = 38;    // #00afd7 青蓝，轻快
+const BG_MODEL_OTHER: u8 = 102;   // #878787 灰，其他/未知
+const BG_PROJECT: u8 = 73;     // #5fafaf 灰青
+const BG_GIT: u8 = 209;        // #ff875f 暖橙
+const BG_CTX_SAFE: u8 = 78;    // #5fd787 春绿
+const BG_WARN: u8 = 221;       // #ffd75f 金黄
+const BG_DANGER: u8 = 167;     // #d75f5f 印度红
+const BG_QUOTA_SAFE: u8 = 110; // #87afd7 天蓝
+
+/// 渲染单个色块：` text `（前后各一空格内边距），256-color SGR
+fn block(bg: u8, fg: u8, text: &str) -> String {
+    format!("\x1b[48;5;{bg}m\x1b[38;5;{fg}m {text} \x1b[0m")
+}
+
+/// 截断字符串，按视觉宽度（CJK 算 2）裁到 max 列，超出时用 `…` 收尾
+fn truncate_visual(s: &str, max: usize) -> String {
+    let total = s.chars().map(char_width).sum::<usize>();
+    if total <= max {
+        return s.to_string();
+    }
+    let mut out = String::new();
+    let mut used = 0usize;
+    let limit = max.saturating_sub(1); // 留 1 列给 …
+    for c in s.chars() {
+        let w = char_width(c);
+        if used + w > limit {
+            break;
+        }
+        out.push(c);
+        used += w;
+    }
+    out.push_str(".."); // ASCII 省略号，避免 Unicode `…` 在 Windows 老终端缺字形
+    out
+}
+
+/// 取模型短名：Opus / Sonnet / Haiku，否则取首词
+fn short_model(name: &str) -> String {
+    for word in ["Opus", "Sonnet", "Haiku"] {
+        if name.contains(word) {
+            return word.to_string();
+        }
+    }
+    name.split_whitespace().next().unwrap_or(name).to_string()
+}
+
+/// 模型强度色：Opus 紫红 / Sonnet 紫蓝 / Haiku 青蓝 / 其他灰
+fn model_block_bg(short: &str) -> u8 {
+    match short {
+        "Opus" => BG_MODEL_OPUS,
+        "Sonnet" => BG_MODEL_SONNET,
+        "Haiku" => BG_MODEL_HAIKU,
+        _ => BG_MODEL_OTHER,
+    }
+}
+
+/// ctx 色块底色（统一阈值：<60 绿 / <70 黄 / >=70 红）
+fn ctx_block_colors(pct: f64) -> (u8, u8) {
+    if pct < 60.0 {
+        (BG_CTX_SAFE, FG_DARK)
+    } else if pct < 70.0 {
+        (BG_WARN, FG_DARK)
+    } else {
+        (BG_DANGER, FG_DARK)
+    }
+}
+
+/// quota 色块底色（>=90 红 / 超速或>=75 黄 / 否则蓝）
+fn quota_block_colors(pct: f64, over: bool) -> (u8, u8) {
+    if pct >= 90.0 {
+        (BG_DANGER, FG_DARK)
+    } else if over || pct >= 75.0 {
+        (BG_WARN, FG_DARK)
+    } else {
+        (BG_QUOTA_SAFE, FG_DARK)
+    }
+}
+
+/// quota 色块（5h / 7d）：`U/P% L` 或超速时 `U/P%! L ETA HH:MM`
+fn quota_block(w: &crate::usage::WindowUsage, window_secs: i64, label: &str) -> String {
+    let pace = crate::usage::calc_pace(w, window_secs);
+    let pace_pct = pace.as_ref().map(|p| p.pace_percent).unwrap_or(0.0);
+    let over = pace.as_ref().is_some_and(|p| p.direction == crate::usage::PaceDirection::Over);
+
+    let (bg, fg) = quota_block_colors(w.used_percent, over);
+    let alert = if over { "!" } else { "" };
+
+    let eta_str = if over {
+        pace.as_ref()
+            .and_then(|p| p.depletion_eta.as_ref())
+            .map(|eta| {
+                let local: chrono::DateTime<chrono::Local> = eta.with_timezone(&chrono::Local);
+                let today = chrono::Local::now().date_naive();
+                let fmt = if local.date_naive() == today {
+                    local.format("%H:%M").to_string()
+                } else {
+                    local.format("%-m/%-d %H:%M").to_string()
+                };
+                format!(" ETA {fmt}")
+            })
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let text = format!(
+        "{:.0}/{:.0}%{alert} {label}{eta_str}",
+        w.used_percent, pace_pct
+    );
+    block(bg, fg, &text)
+}
+
+/// Mini 模式：所有信息压缩为色块串，按宽度自适应拆行
+///
+/// 内部分两组：
+///   identity = [model, project, git]   — 灰底身份信息
+///   metrics  = [ctx, 5h, 7d, update?]  — 配色随状态切换
+/// 单行装得下 → 一行；装不下 → identity 一行 / metrics 一行；仍装不下 → 每段一行
+fn render_mini(ctx: &RenderContext) {
+    let mut identity: Vec<String> = Vec::new();
+    let mut metrics: Vec<String> = Vec::new();
+
+    // 模型短名（按强度配色）
+    let model = short_model(&crate::input::get_model_name(&ctx.stdin));
+    identity.push(block(model_block_bg(&model), FG_DARK, &model));
+
+    // 项目名（截断到 16 列）
+    let project_name = ctx
+        .stdin
+        .cwd
+        .as_deref()
+        .or_else(|| {
+            ctx.stdin
+                .workspace
+                .as_ref()
+                .and_then(|w| w.current_dir.as_deref())
+        })
+        .and_then(|p| std::path::Path::new(p).file_name())
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown");
+    identity.push(block(
+        BG_PROJECT,
+        FG_DARK,
+        &truncate_visual(project_name, 16),
+    ));
+
+    // git 段：branch[*][↑N][↓M]，branch 截断到 16 列
+    if let Some(branch) = &ctx.git.branch {
+        let branch_short = truncate_visual(branch, 16);
+        let dirty = if ctx.git.is_dirty { "*" } else { "" };
+        let mut suffix = String::new();
+        if ctx.git.ahead > 0 {
+            suffix.push_str(&format!(" ↑{}", ctx.git.ahead));
+        }
+        if ctx.git.behind > 0 {
+            suffix.push_str(&format!(" ↓{}", ctx.git.behind));
+        }
+        identity.push(block(
+            BG_GIT,
+            FG_DARK,
+            &format!("{branch_short}{dirty}{suffix}"),
+        ));
+    }
+
+    // ctx
+    if ctx.config.display.context {
+        let ctx_pct = crate::input::get_context_percent(&ctx.stdin);
+        let (bg, fg) = ctx_block_colors(ctx_pct);
+        metrics.push(block(bg, fg, &format!("ctx {ctx_pct:.0}%")));
+    }
+
+    // 5h
+    if ctx.config.display.five_hour {
+        if let Some(w) = &ctx.usage.five_hour {
+            metrics.push(quota_block(w, crate::usage::WINDOW_5H_SECS, "5h"));
+        }
+    }
+
+    // 7d
+    if ctx.config.display.seven_day {
+        if let Some(w) = &ctx.usage.seven_day {
+            metrics.push(quota_block(w, crate::usage::WINDOW_7D_SECS, "7d"));
+        }
+    }
+
+    // 升级提示
+    if let Some(v) = &ctx.update_hint {
+        metrics.push(block(BG_WARN, FG_DARK, &format!("↑{v}")));
+    }
+
+    // 同色块紧贴时不易区分 → 块间统一插入 1 列空格
+    let sep = " ";
+    let identity_line = identity.join(sep);
+    let metrics_line = metrics.join(sep);
+    let single_line = if identity_line.is_empty() {
+        metrics_line.clone()
+    } else if metrics_line.is_empty() {
+        identity_line.clone()
+    } else {
+        format!("{identity_line}{sep}{metrics_line}")
+    };
+
+    let width = detect_terminal_width();
+
+    // 优先单行
+    if visible_width(&single_line) <= width {
+        println!("{single_line}");
+        return;
+    }
+
+    // 单行装不下：尝试 identity 一行 + metrics 一行
+    let id_w = visible_width(&identity_line);
+    let met_w = visible_width(&metrics_line);
+    if id_w <= width && met_w <= width {
+        if !identity_line.is_empty() {
+            println!("{identity_line}");
+        }
+        if !metrics_line.is_empty() {
+            println!("{metrics_line}");
+        }
+        return;
+    }
+
+    // 仍装不下：每段独占一行
+    for b in identity.iter().chain(metrics.iter()) {
+        println!("{b}");
     }
 }

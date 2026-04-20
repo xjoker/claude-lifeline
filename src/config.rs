@@ -18,7 +18,7 @@ pub struct DisplayConfig {
     /// 显示 7d quota 段
     #[serde(default = "yes")]
     pub seven_day: bool,
-    /// 第二行布局：auto 按终端宽度自动拆分，single 强制单行，multi 强制每段独占一行
+    /// 布局：auto 按终端宽度自动拆分，single 强制单行，multi 强制每段独占一行，mini 极简色块单行
     #[serde(default = "Layout::default")]
     pub layout: Layout,
 }
@@ -29,6 +29,7 @@ pub enum Layout {
     Auto,
     Single,
     Multi,
+    Mini,
 }
 
 impl Layout {
