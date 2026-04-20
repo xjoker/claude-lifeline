@@ -2,7 +2,7 @@
 
 All notable changes to claude-lifeline will be documented in this file.
 
-## [Unreleased]
+## [0.0.5] - 2026-04-20
 
 ### Added
 - **Configurable color thresholds** — new `[thresholds]` section in
@@ -15,6 +15,13 @@ All notable changes to claude-lifeline will be documented in this file.
   `pace_tolerance`. All fields are optional; invalid pairs
   (yellow ≥ red or out of [0, 100]) fall back per-pair to defaults.
   Mini and standard layouts share the same thresholds.
+- **Session edit stats** — new segment showing `+lines_added -lines_removed`
+  whenever either is non-zero. `+N` is rendered in green and `-N` in red
+  so greenfield work vs refactors reads at a glance. Mini layout places
+  them in a standalone neutral-gray block after git; standard layout
+  appends them dim on line 1. Toggle via `display.edit_stats` (default
+  true). Abbreviates to `k` at ≥1000 lines with one decimal up to 10k,
+  integer k thereafter.
 
 ### Changed
 - Mini layout now preserves the full `display_name` Claude Code
@@ -29,6 +36,31 @@ All notable changes to claude-lifeline will be documented in this file.
   layout. Previously they only edited `config.toml`, which silently
   no-op'd on machines whose binary predated the new layout value. The
   download is skipped when the binary is already current.
+
+### Fixed
+- **ANSI injection via stdin** — `display_name`, `cwd` and git branch
+  names now strip all control characters (ESC, CR, LF, NUL, other
+  C0/C1) before being written to stdout. Without this, a corrupted or
+  hostile value could break out of its block with `\n` or inject
+  arbitrary colouring with `\x1b[...]m`.
+- **Update-check spawn race** — first install and every 24h cache
+  expiry used to trigger a re-spawn on every ~300ms invocation while
+  the background check was in flight, piling up 15+ concurrent
+  subprocesses each doing a 5s network fetch. A sentinel cache is now
+  written synchronously before the spawn, so subsequent invocations
+  see fresh cache and skip the re-spawn; the background process still
+  overwrites the sentinel with the real `latest_version` on completion.
+- **install.sh no-jq fallback on empty `settings.json`** — the sed
+  pattern used to produce invalid JSON (`{,"statusLine":...}`) when
+  the file was `{}`. Empty-object case now writes a full fresh
+  document; non-empty objects still get the comma-prefixed insertion.
+- **install.sh / install.ps1 `set_layout` scope** — both scripts used
+  a global pattern that would rewrite any `layout =` line anywhere in
+  `config.toml`, so a future `[thresholds]` or other section with the
+  same key name would have been corrupted. Replacement is now scoped
+  to the `[display]` section via an awk / PowerShell state machine.
+- Minor: corrected a stale comment in `usage.rs` that claimed cache
+  writes were async — they are and always were synchronous.
 
 ## [0.0.4] - 2026-04-20
 
