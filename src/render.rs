@@ -479,23 +479,32 @@ fn truncate_visual(s: &str, max: usize) -> String {
     out
 }
 
-/// 取模型短名：Opus / Sonnet / Haiku，否则取首词
-fn short_model(name: &str) -> String {
-    for word in ["Opus", "Sonnet", "Haiku"] {
-        if name.contains(word) {
-            return word.to_string();
+/// 直接采用 Claude Code 提供的 display_name（如 "Opus 4.7"、"Sonnet 4.6"、"GLM-4.5"），
+/// 仅把扩展上下文标识 `(1M ...)` 压缩为 ` 1M` 让 mini 块更紧凑。
+/// 未匹配的格式（第三方模型等）原样返回。
+fn short_model(display_name: &str) -> String {
+    // 匹配 "(1M" 起、" )" 止的整段（含前导空格），替换为 " 1M"
+    if let Some(open) = display_name.find("(1M") {
+        if let Some(close_rel) = display_name[open..].find(')') {
+            let head = display_name[..open].trim_end();
+            let tail = &display_name[open + close_rel + 1..];
+            return format!("{head} 1M{tail}");
         }
     }
-    name.split_whitespace().next().unwrap_or(name).to_string()
+    display_name.to_string()
 }
 
 /// 模型强度色：Opus 紫红 / Sonnet 紫蓝 / Haiku 青蓝 / 其他灰
-fn model_block_bg(short: &str) -> u8 {
-    match short {
-        "Opus" => BG_MODEL_OPUS,
-        "Sonnet" => BG_MODEL_SONNET,
-        "Haiku" => BG_MODEL_HAIKU,
-        _ => BG_MODEL_OTHER,
+/// 用 contains 而非 == 以兼容带版本号的 display_name（如 "Opus 4.7 1M"）
+fn model_block_bg(name: &str) -> u8 {
+    if name.contains("Opus") {
+        BG_MODEL_OPUS
+    } else if name.contains("Sonnet") {
+        BG_MODEL_SONNET
+    } else if name.contains("Haiku") {
+        BG_MODEL_HAIKU
+    } else {
+        BG_MODEL_OTHER
     }
 }
 
