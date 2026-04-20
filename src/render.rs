@@ -86,10 +86,10 @@ pub fn render(ctx: &RenderContext) {
         format!(" {DIM}{formatted}{RESET}")
     }).unwrap_or_default();
 
-    // 代码改动量 — dim 显示（仅当启用 + 有增删）
+    // 代码改动量 — `+X` 绿、`-Y` 红（仅当启用 + 有增删）
     let stats_section = if ctx.config.display.edit_stats {
-        edit_stats_text(&ctx.stdin)
-            .map(|s| format!(" {DIM}{s}{RESET}"))
+        edit_stats_parts(&ctx.stdin)
+            .map(|(a, r)| format!(" {GREEN}{a}{RESET} {RED}{r}{RESET}"))
             .unwrap_or_default()
     } else {
         String::new()
@@ -373,15 +373,30 @@ fn format_lines(count: u64) -> String {
     }
 }
 
-/// 生成代码改动量片段（仅当 added>0 或 removed>0）。返回 (text, 是否有内容)
-fn edit_stats_text(stdin: &crate::input::StdinData) -> Option<String> {
+/// 生成代码改动量片段（仅当 added>0 或 removed>0）。
+/// 返回 (added_formatted, removed_formatted)，如 ("+1.3k", "-344")
+fn edit_stats_parts(stdin: &crate::input::StdinData) -> Option<(String, String)> {
     let cost = stdin.cost.as_ref()?;
     let added = cost.total_lines_added.unwrap_or(0);
     let removed = cost.total_lines_removed.unwrap_or(0);
     if added == 0 && removed == 0 {
         return None;
     }
-    Some(format!("+{} -{}", format_lines(added), format_lines(removed)))
+    Some((
+        format!("+{}", format_lines(added)),
+        format!("-{}", format_lines(removed)),
+    ))
+}
+
+/// mini stats 块：灰底 + `+X` 绿字 / `-Y` 红字，中间空格保持 bg 连续
+fn stats_block(added: &str, removed: &str) -> String {
+    // 在同一个 bg 内切换 fg：先开 bg + 左 padding，再依次染色两段，最后 reset
+    format!(
+        "\x1b[48;5;{bg}m\x1b[38;5;{green}m {added}\x1b[38;5;{red}m {removed} \x1b[0m",
+        bg = BG_STATS,
+        green = BG_CTX_SAFE,
+        red = BG_DANGER,
+    )
 }
 
 /// 渲染带配速标记的进度条（配速线插入而非替换，不吃掉填充块）
@@ -485,8 +500,7 @@ const BG_CTX_SAFE: u8 = 78;    // #5fd787 春绿
 const BG_WARN: u8 = 221;       // #ffd75f 金黄
 const BG_DANGER: u8 = 167;     // #d75f5f 印度红
 const BG_QUOTA_SAFE: u8 = 110; // #87afd7 天蓝
-const BG_STATS: u8 = 238;      // #444444 中性暗灰，不抢眼
-const FG_STATS: u8 = 252;      // #d0d0d0 亮灰文字，在暗底上清晰
+const BG_STATS: u8 = 238;      // #444444 中性暗灰，stats 块底色
 
 /// 渲染单个色块：` text `（前后各一空格内边距），256-color SGR
 fn block(bg: u8, fg: u8, text: &str) -> String {
@@ -640,8 +654,7 @@ fn render_mini(ctx: &RenderContext) {
         &truncate_visual(project_name, 16),
     ));
 
-    // git 段：branch[*][↑N][↓M][  +X -Y]，branch 截断到 16 列
-    // 代码改动量（若启用且非零）并入同一块，避免块数爆炸 + 同类信息视觉分组
+    // git 段：branch[*][↑N][↓M]，branch 截断到 16 列
     if let Some(branch) = &ctx.git.branch {
         let branch_short = truncate_visual(branch, 16);
         let dirty = if ctx.git.is_dirty { "*" } else { "" };
@@ -652,20 +665,17 @@ fn render_mini(ctx: &RenderContext) {
         if ctx.git.behind > 0 {
             suffix.push_str(&format!(" ↓{}", ctx.git.behind));
         }
-        if ctx.config.display.edit_stats {
-            if let Some(stats) = edit_stats_text(&ctx.stdin) {
-                suffix.push_str(&format!(" {stats}"));
-            }
-        }
         identity.push(block(
             BG_GIT,
             FG_DARK,
             &format!("{branch_short}{dirty}{suffix}"),
         ));
-    } else if ctx.config.display.edit_stats {
-        // 没有 git 仓库但有改动量 → 独立块显示
-        if let Some(stats) = edit_stats_text(&ctx.stdin) {
-            identity.push(block(BG_STATS, FG_STATS, &stats));
+    }
+
+    // 代码改动量块：+X 绿 / -Y 红，中性灰底
+    if ctx.config.display.edit_stats {
+        if let Some((added, removed)) = edit_stats_parts(&ctx.stdin) {
+            identity.push(stats_block(&added, &removed));
         }
     }
 
