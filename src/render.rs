@@ -86,10 +86,14 @@ pub fn render(ctx: &RenderContext) {
         format!(" {DIM}{formatted}{RESET}")
     }).unwrap_or_default();
 
-    // 代码改动量 — dim 显示（仅当有增删）
-    let stats_section = edit_stats_text(&ctx.stdin)
-        .map(|s| format!(" {DIM}{s}{RESET}"))
-        .unwrap_or_default();
+    // 代码改动量 — dim 显示（仅当启用 + 有增删）
+    let stats_section = if ctx.config.display.edit_stats {
+        edit_stats_text(&ctx.stdin)
+            .map(|s| format!(" {DIM}{s}{RESET}"))
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
 
     let line1 = format!("{model_section} {project_display}{git_section}{stats_section}{session_section}");
 
@@ -636,7 +640,8 @@ fn render_mini(ctx: &RenderContext) {
         &truncate_visual(project_name, 16),
     ));
 
-    // git 段：branch[*][↑N][↓M]，branch 截断到 16 列
+    // git 段：branch[*][↑N][↓M][  +X -Y]，branch 截断到 16 列
+    // 代码改动量（若启用且非零）并入同一块，避免块数爆炸 + 同类信息视觉分组
     if let Some(branch) = &ctx.git.branch {
         let branch_short = truncate_visual(branch, 16);
         let dirty = if ctx.git.is_dirty { "*" } else { "" };
@@ -647,16 +652,21 @@ fn render_mini(ctx: &RenderContext) {
         if ctx.git.behind > 0 {
             suffix.push_str(&format!(" ↓{}", ctx.git.behind));
         }
+        if ctx.config.display.edit_stats {
+            if let Some(stats) = edit_stats_text(&ctx.stdin) {
+                suffix.push_str(&format!(" {stats}"));
+            }
+        }
         identity.push(block(
             BG_GIT,
             FG_DARK,
             &format!("{branch_short}{dirty}{suffix}"),
         ));
-    }
-
-    // 代码改动量（仅当有增删时）
-    if let Some(stats) = edit_stats_text(&ctx.stdin) {
-        identity.push(block(BG_STATS, FG_STATS, &stats));
+    } else if ctx.config.display.edit_stats {
+        // 没有 git 仓库但有改动量 → 独立块显示
+        if let Some(stats) = edit_stats_text(&ctx.stdin) {
+            identity.push(block(BG_STATS, FG_STATS, &stats));
+        }
     }
 
     let t = &ctx.config.thresholds;

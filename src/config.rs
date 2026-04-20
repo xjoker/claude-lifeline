@@ -104,6 +104,9 @@ pub struct DisplayConfig {
     /// 显示 7d quota 段
     #[serde(default = "yes")]
     pub seven_day: bool,
+    /// 显示代码改动量 +X -Y（仅当本 session 有增删时）
+    #[serde(default = "yes")]
+    pub edit_stats: bool,
     /// 布局：auto 按终端宽度自动拆分，single 强制单行，multi 强制每段独占一行，mini 极简色块单行
     #[serde(default = "Layout::default")]
     pub layout: Layout,
@@ -139,6 +142,7 @@ impl Default for DisplayConfig {
             context: true,
             five_hour: true,
             seven_day: true,
+            edit_stats: true,
             layout: Layout::Auto,
         }
     }

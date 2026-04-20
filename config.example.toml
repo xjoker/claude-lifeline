@@ -6,6 +6,8 @@
 context = true     # context window 段
 five_hour = true   # 5h quota 段
 seven_day = true   # 7d quota 段
+edit_stats = true  # 代码改动量 +X -Y（standard 模式 dim 挂在 git 后面，
+                   # mini 模式并入 git 色块。仅当 session 有增删时渲染）
 layout = "auto"    # 布局: auto | single | multi | mini
                    #   auto   — 按终端宽度自动选择（窄则每段独占一行）
                    #   single — 强制单行（可能被终端截断）
