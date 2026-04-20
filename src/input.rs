@@ -74,19 +74,25 @@ pub async fn read_stdin() -> anyhow::Result<StdinData> {
     Ok(data)
 }
 
-/// 获取模型显示名称
+/// 获取模型显示名称（过滤控制字符，防止 ESC/换行注入 ANSI 或换行污染状态栏）
 pub fn get_model_name(stdin: &StdinData) -> String {
     if let Some(model) = &stdin.model {
         if let Some(name) = &model.display_name {
             if !name.is_empty() {
-                return name.clone();
+                return sanitize_external(name);
             }
         }
         if let Some(id) = &model.id {
-            return id.clone();
+            return sanitize_external(id);
         }
     }
     "Unknown".to_string()
+}
+
+/// 剥离控制字符：ESC / 换行 / 回车 / NUL / 其他 C0 / C1 控制符
+/// 用于所有从外部读取、最终进入 ANSI 输出流的字符串
+pub fn sanitize_external(s: &str) -> String {
+    s.chars().filter(|c| !c.is_control()).collect()
 }
 
 /// 获取 context 使用百分比（优先 native，回退手动计算）

@@ -27,22 +27,38 @@ function Set-Layout {
         return
     }
     Copy-Item $Config "$Config.bak"
+    # 段内替换/插入：只在 [display] 段内改 layout，避免误伤其他段同名字段
     $lines = Get-Content $Config
-    if ($lines -match '^\s*layout\s*=') {
-        $lines = $lines | ForEach-Object {
-            if ($_ -match '^\s*layout\s*=') { "layout = `"$Layout`"" } else { $_ }
+    $out = New-Object System.Collections.Generic.List[string]
+    $inDisplay = $false
+    $replaced = $false
+    foreach ($line in $lines) {
+        if ($line -match '^\[[^\]]+\]\s*$') {
+            if ($inDisplay -and -not $replaced) {
+                $out.Add("layout = `"$Layout`"")
+                $replaced = $true
+            }
+            $inDisplay = ($line -match '^\[display\]\s*$')
+            $out.Add($line)
+            continue
         }
-        Set-Content -Path $Config -Value $lines -Encoding UTF8
-    } elseif ($lines -match '^\[display\]') {
-        $out = @()
-        foreach ($line in $lines) {
-            $out += $line
-            if ($line -match '^\[display\]\s*$') { $out += "layout = `"$Layout`"" }
+        if ($inDisplay -and $line -match '^\s*layout\s*=') {
+            $out.Add("layout = `"$Layout`"")
+            $replaced = $true
+            continue
         }
-        Set-Content -Path $Config -Value $out -Encoding UTF8
-    } else {
-        Add-Content -Path $Config -Value "`n[display]`nlayout = `"$Layout`"" -Encoding UTF8
+        $out.Add($line)
     }
+    if ($inDisplay -and -not $replaced) {
+        $out.Add("layout = `"$Layout`"")
+        $replaced = $true
+    }
+    if (-not $replaced) {
+        $out.Add("")
+        $out.Add("[display]")
+        $out.Add("layout = `"$Layout`"")
+    }
+    Set-Content -Path $Config -Value $out -Encoding UTF8
     Write-Host "Set layout = `"$Layout`" in $Config (backup: config.toml.bak)"
 }
 

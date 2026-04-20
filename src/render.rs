@@ -44,7 +44,7 @@ pub fn render(ctx: &RenderContext) {
     // [Model] — 青色
     let model_section = format!("{CYAN}[{model_name}]{RESET}");
 
-    // cwd 层级 — 黄色，HOME 替换为 ~
+    // cwd 层级 — 黄色，HOME 替换为 ~，剥离控制字符防注入
     let cwd_str = ctx
         .stdin
         .cwd
@@ -56,10 +56,12 @@ pub fn render(ctx: &RenderContext) {
                 .and_then(|w| w.current_dir.as_deref())
         })
         .unwrap_or("unknown");
-    let project_display = format!("{YELLOW}{}{RESET}", abbrev_home(cwd_str));
+    let cwd_clean = crate::input::sanitize_external(cwd_str);
+    let project_display = format!("{YELLOW}{}{RESET}", abbrev_home(&cwd_clean));
 
-    // git 部分 — git:() 品红，分支名青色，ahead/behind
+    // git 部分 — git:() 品红，分支名青色，ahead/behind（分支名剥控制字符）
     let git_section = if let Some(branch) = &ctx.git.branch {
+        let branch_clean = crate::input::sanitize_external(branch);
         let dirty = if ctx.git.is_dirty { "*" } else { "" };
         let mut ab = String::new();
         if ctx.git.ahead > 0 {
@@ -68,7 +70,7 @@ pub fn render(ctx: &RenderContext) {
         if ctx.git.behind > 0 {
             ab.push_str(&format!(" {RED}↓{}{RESET}", ctx.git.behind));
         }
-        format!(" {MAGENTA}git:({RESET}{CYAN}{branch}{dirty}{RESET}{MAGENTA}){RESET}{ab}")
+        format!(" {MAGENTA}git:({RESET}{CYAN}{branch_clean}{dirty}{RESET}{MAGENTA}){RESET}{ab}")
     } else {
         String::new()
     };
@@ -635,7 +637,7 @@ fn render_mini(ctx: &RenderContext) {
     identity.push(block(model_block_bg(&model), FG_DARK, &model));
 
     // 项目名（截断到 16 列）
-    let project_name = ctx
+    let project_name_raw = ctx
         .stdin
         .cwd
         .as_deref()
@@ -648,15 +650,17 @@ fn render_mini(ctx: &RenderContext) {
         .and_then(|p| std::path::Path::new(p).file_name())
         .and_then(|n| n.to_str())
         .unwrap_or("unknown");
+    let project_name_clean = crate::input::sanitize_external(project_name_raw);
     identity.push(block(
         BG_PROJECT,
         FG_DARK,
-        &truncate_visual(project_name, 16),
+        &truncate_visual(&project_name_clean, 16),
     ));
 
-    // git 段：branch[*][↑N][↓M]，branch 截断到 16 列
+    // git 段：branch[*][↑N][↓M]，branch 剥控制字符 + 截断到 16 列
     if let Some(branch) = &ctx.git.branch {
-        let branch_short = truncate_visual(branch, 16);
+        let branch_clean = crate::input::sanitize_external(branch);
+        let branch_short = truncate_visual(&branch_clean, 16);
         let dirty = if ctx.git.is_dirty { "*" } else { "" };
         let mut suffix = String::new();
         if ctx.git.ahead > 0 {

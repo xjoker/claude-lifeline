@@ -41,6 +41,10 @@ pub fn check_update_hint() -> Option<String> {
 
     // 缓存过期 → 触发后台检查
     if now - cache.checked_at >= CHECK_INTERVAL_SECS {
+        // 先写 sentinel（把 timestamp 刷成当前），避免后台子进程完成前主进程每
+        // ~300ms 调用一次都重新 spawn —— 实测首次安装后若不 touch，5s 内会 fork 15+
+        // 个子进程同时发起 5s 网络超时，全是无用功
+        touch_cache_sentinel();
         spawn_background_check();
     }
 
@@ -75,14 +79,32 @@ fn version_gt(a: &str, b: &str) -> bool {
     }
 }
 
-/// 首次无缓存时也触发后台检查
+/// 首次无缓存时也触发后台检查（先写 sentinel 避免并发 spawn 风暴）
 pub fn ensure_cache_exists() {
     if is_dev_build() {
         return;
     }
     let path = cache_path();
     if !path.exists() {
+        touch_cache_sentinel();
         spawn_background_check();
+    }
+}
+
+/// 写入 sentinel cache：latest_version = 当前版本 + 当前时间戳。
+/// 作用是让后续快速连续的主进程调用看到新鲜 cache → 不再 re-spawn。
+/// 真正的 fetch_latest_version 完成后会 overwrite 这份 cache。
+fn touch_cache_sentinel() {
+    let path = cache_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let cache = UpdateCache {
+        latest_version: CURRENT_VERSION.to_string(),
+        checked_at: chrono::Utc::now().timestamp(),
+    };
+    if let Ok(json) = serde_json::to_string(&cache) {
+        let _ = std::fs::write(path, json);
     }
 }
 

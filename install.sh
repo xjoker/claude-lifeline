@@ -21,20 +21,40 @@ set_layout() {
     return
   fi
   cp "$CONFIG" "$CONFIG.bak"
-  if grep -qE '^[[:space:]]*layout[[:space:]]*=' "$CONFIG"; then
-    # 替换已有 layout 行
-    sed -i.tmp -E "s|^[[:space:]]*layout[[:space:]]*=.*|layout = \"$layout\"|" "$CONFIG"
-    rm -f "$CONFIG.tmp"
-  elif grep -qE '^\[display\]' "$CONFIG"; then
-    # 在 [display] 段下追加（用临时文件以兼容 BSD/GNU sed）
-    awk -v layout="$layout" '
-      /^\[display\][[:space:]]*$/ { print; print "layout = \"" layout "\""; next }
-      { print }
-    ' "$CONFIG.bak" > "$CONFIG"
-  else
-    # 无 [display] 段，追加新段
-    printf '\n[display]\nlayout = "%s"\n' "$layout" >> "$CONFIG"
-  fi
+  # 用 awk 做段内替换/插入，避免误改 [display] 之外 segment 里同名字段
+  awk -v layout="$layout" '
+    BEGIN { in_display = 0; replaced = 0 }
+    # 段标题
+    /^\[[^]]+\][[:space:]]*$/ {
+      # 离开 [display] 前，如还没替换成功，就在段末尾补一行
+      if (in_display && !replaced) {
+        print "layout = \"" layout "\""
+        replaced = 1
+      }
+      in_display = ($0 ~ /^\[display\][[:space:]]*$/)
+      print
+      next
+    }
+    # [display] 段内的 layout 行 → 替换
+    in_display && /^[[:space:]]*layout[[:space:]]*=/ {
+      print "layout = \"" layout "\""
+      replaced = 1
+      next
+    }
+    { print }
+    END {
+      if (in_display && !replaced) {
+        print "layout = \"" layout "\""
+        replaced = 1
+      }
+      # 文件完全没有 [display] 段 → 追加新段
+      if (!replaced) {
+        print ""
+        print "[display]"
+        print "layout = \"" layout "\""
+      }
+    }
+  ' "$CONFIG.bak" > "$CONFIG"
   echo "Set layout = \"$layout\" in $CONFIG (backup: config.toml.bak)"
 }
 
@@ -47,8 +67,14 @@ settings_add() {
   if has_jq; then
     jq --argjson sl "$STATUS_LINE_JSON" '.statusLine = $sl' "$SETTINGS.bak" > "$SETTINGS"
   else
-    # sed fallback: insert before final }
-    sed -i.tmp 's/}[[:space:]]*$/,"statusLine":{"type":"command","command":"~\/.claude\/bin\/claude-lifeline"}}/' "$SETTINGS"
+    # sed fallback: 区分空对象 {} 与已有键的情况
+    #   空对象：`{,"statusLine":...}` 会是无效 JSON，需要不带逗号的形式
+    #   有键：在最后 } 前插入 `,"statusLine":...`
+    if grep -q '"' "$SETTINGS"; then
+      sed -i.tmp 's/}[[:space:]]*$/,"statusLine":{"type":"command","command":"~\/.claude\/bin\/claude-lifeline"}}/' "$SETTINGS"
+    else
+      printf '{"statusLine":{"type":"command","command":"%s"}}\n' "$STATUS_LINE_CMD" > "$SETTINGS"
+    fi
     rm -f "$SETTINGS.tmp"
   fi
   echo "Updated settings.json (backup: settings.json.bak)"

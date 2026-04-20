@@ -113,7 +113,7 @@ pub async fn get_usage_data(rate_limits: Option<&RateLimits>) -> UsageData {
                 five_hour,
                 seven_day,
             };
-            // 写入缓存（异步但不等待结果）
+            // 同步写入缓存（fs::write，亚毫秒级，不阻塞渲染）
             write_cache(&usage);
             return usage;
         }
