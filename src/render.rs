@@ -86,7 +86,12 @@ pub fn render(ctx: &RenderContext) {
         format!(" {DIM}{formatted}{RESET}")
     }).unwrap_or_default();
 
-    let line1 = format!("{model_section} {project_display}{git_section}{session_section}");
+    // 代码改动量 — dim 显示（仅当有增删）
+    let stats_section = edit_stats_text(&ctx.stdin)
+        .map(|s| format!(" {DIM}{s}{RESET}"))
+        .unwrap_or_default();
+
+    let line1 = format!("{model_section} {project_display}{git_section}{stats_section}{session_section}");
 
     // ── 行2 ──
     let mut segments: Vec<String> = Vec::new();
@@ -353,6 +358,28 @@ fn format_tokens(count: u64) -> String {
     }
 }
 
+/// 格式化代码行数（比 format_tokens 粒度更细：1.3k 而非 1k）
+fn format_lines(count: u64) -> String {
+    if count >= 10_000 {
+        format!("{:.0}k", count as f64 / 1_000.0)
+    } else if count >= 1_000 {
+        format!("{:.1}k", count as f64 / 1_000.0)
+    } else {
+        format!("{count}")
+    }
+}
+
+/// 生成代码改动量片段（仅当 added>0 或 removed>0）。返回 (text, 是否有内容)
+fn edit_stats_text(stdin: &crate::input::StdinData) -> Option<String> {
+    let cost = stdin.cost.as_ref()?;
+    let added = cost.total_lines_added.unwrap_or(0);
+    let removed = cost.total_lines_removed.unwrap_or(0);
+    if added == 0 && removed == 0 {
+        return None;
+    }
+    Some(format!("+{} -{}", format_lines(added), format_lines(removed)))
+}
+
 /// 渲染带配速标记的进度条（配速线插入而非替换，不吃掉填充块）
 ///
 /// 同色连续字符批量输出，减少 ANSI 转义码开销（约 3x），改善 Windows 宽度截断问题
@@ -454,6 +481,8 @@ const BG_CTX_SAFE: u8 = 78;    // #5fd787 春绿
 const BG_WARN: u8 = 221;       // #ffd75f 金黄
 const BG_DANGER: u8 = 167;     // #d75f5f 印度红
 const BG_QUOTA_SAFE: u8 = 110; // #87afd7 天蓝
+const BG_STATS: u8 = 238;      // #444444 中性暗灰，不抢眼
+const FG_STATS: u8 = 252;      // #d0d0d0 亮灰文字，在暗底上清晰
 
 /// 渲染单个色块：` text `（前后各一空格内边距），256-color SGR
 fn block(bg: u8, fg: u8, text: &str) -> String {
@@ -623,6 +652,11 @@ fn render_mini(ctx: &RenderContext) {
             FG_DARK,
             &format!("{branch_short}{dirty}{suffix}"),
         ));
+    }
+
+    // 代码改动量（仅当有增删时）
+    if let Some(stats) = edit_stats_text(&ctx.stdin) {
+        identity.push(block(BG_STATS, FG_STATS, &stats));
     }
 
     let t = &ctx.config.thresholds;

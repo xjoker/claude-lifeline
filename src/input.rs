@@ -31,6 +31,8 @@ pub struct WorkspaceInfo {
 #[allow(dead_code)]
 pub struct CostInfo {
     pub total_cost_usd: Option<f64>,
+    pub total_lines_added: Option<u64>,
+    pub total_lines_removed: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
