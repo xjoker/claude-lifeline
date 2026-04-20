@@ -6,12 +6,21 @@ A fast Rust status line for [Claude Code](https://docs.anthropic.com/en/docs/cla
 
 ## Preview
 
-![claude-lifeline screenshot](docs/img.png)
+**Standard layout** — full information density across two lines
+
+![claude-lifeline standard layout](docs/img.png)
 
 ```
-─────────────────────────────────────────
-[Opus 4.6]  my-project  git:(main* ↑2)  1h 23m
+[Opus 4.6]  ~/Developer/Repos/my-project  git:(main* ↑2)  1h 23m
 ctx █████░░░░░ 53%  │  5h ████░░|░░░░ 34%(1h 23m)  │  7d ██|█░░░░░░░ 22%!/p14.05%(6d 0h ETA 4/19 08:18 wait 13h)
+```
+
+**Mini layout** — single-line color-block bar (`layout = "mini"`)
+
+![claude-lifeline mini layout](docs/img-mini.png)
+
+```
+ Opus  claude-lifeline  master  ctx 21%  28/51% 5h  33/44% 7d
 ```
 
 ## Why claude-lifeline?
@@ -298,6 +307,102 @@ Usage  Pace position (only shown when over-pace)
 ```
 
 > **Key concept**: The pace marker `|` represents "where you *should* be" based on elapsed time. If filled blocks `█` extend past `|`, you're ahead of pace (over-consuming). The further apart they are, the more aggressively you're burning quota.
+
+## Mini Layout
+
+A compact single-line variant. Everything you'd see across two lines in the standard layout is collapsed into colored blocks side-by-side. Enable it with:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.sh | bash -s mini
+```
+
+Or set `layout = "mini"` in `~/.claude/claude-lifeline/config.toml`.
+
+![mini layout breakdown](docs/img-mini.png)
+
+```
+ Opus  claude-lifeline  master  ctx 21%  28/51% 5h  33/44% 7d
+ ^^^^  ^^^^^^^^^^^^^^^  ^^^^^^  ^^^^^^^  ^^^^^^^^^  ^^^^^^^^^
+ Model Project          Git     Context  5-hour     7-day
+```
+
+### Block Breakdown
+
+| Block | Content | Background colour |
+|-------|---------|-------------------|
+| Model | `Opus` / `Sonnet` / `Haiku` / first word of unknown model | **Intensity-coded** — see table below |
+| Project | `cwd` basename, truncated to 16 cols with `..` if longer | Cadet teal |
+| Git | `branch[*][ ↑N][ ↓N]` — branch name truncated to 16 cols | Warm orange |
+| Context | `ctx N%` | **Green / Yellow / Red** by threshold |
+| 5h / 7d quota | `used%/pace% Lh` (e.g., `28/51% 5h`); over-pace adds `!` and ` ETA HH:MM` | **Blue / Yellow / Red** by threshold + over-pace |
+
+### Model Intensity Colors
+
+The model block hue reflects tier:
+
+| Model | Background | Meaning |
+|-------|-----------|---------|
+| `Opus` | Violet-magenta (256 #134) | Flagship — most capable |
+| `Sonnet` | Violet (256 #99) | Balanced |
+| `Haiku` | Cyan (256 #38) | Light & fast |
+| Other / unknown | Gray (256 #102) | Fallback |
+
+### Context Color Thresholds (mini & standard)
+
+| Color | Threshold |
+|-------|-----------|
+| Green | `< 60%` |
+| Yellow | `60–70%` |
+| Red | `≥ 70%` |
+
+### Quota Color Thresholds (mini)
+
+| Color | Condition |
+|-------|-----------|
+| Blue | usage `< 75%` AND on pace |
+| Yellow | usage `75–90%` OR over-pace |
+| Red | usage `≥ 90%` |
+
+### Over-Pace Indicator
+
+When a quota's actual usage exceeds the elapsed-time pace, the block:
+
+1. Switches to yellow (or stays red if already `≥ 90%`)
+2. Appends `!` after the percentage pair
+3. Appends ` ETA HH:MM` showing the projected depletion time (cross-day uses `M/D HH:MM`)
+
+```
+85/23%! 5h ETA 09:35
+^^ ^^   ^   ^^^^^^^^
+│  │    │   └─ Predicted depletion at 09:35 local time
+│  │    └─ Over-pace alert
+│  └─ Pace position: 23% of the 5h window has elapsed
+└─ 85% of the 5h quota consumed (way ahead of pace)
+```
+
+### Width-Aware Wrapping
+
+Mini auto-adapts to the terminal width:
+
+- **Wide enough** → all blocks on one line
+- **Narrow** → splits into two lines: `model + project + git` on line 1, `ctx + 5h + 7d` on line 2
+- **Very narrow** → one block per line
+
+The 1-column gap between blocks ensures adjacent same-color segments stay distinguishable without separator characters.
+
+### Differences vs Standard
+
+Mini drops the following to keep the bar compact:
+
+- Progress bars (`█████░░░░░`)
+- Pace marker (`|`)
+- Token breakdown (`(in:Xk c:Yk)`)
+- Window reset countdown (`6d 0h`)
+- Recovery wait time (`wait 45m`)
+- Pace position (`/p32.15%`)
+- Session duration
+
+If you want any of those, use the standard layout instead.
 
 ## Configuration
 
