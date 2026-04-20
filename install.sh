@@ -5,8 +5,38 @@ REPO="xjoker/claude-lifeline"
 INSTALL_DIR="$HOME/.claude/bin"
 BIN_NAME="claude-lifeline"
 SETTINGS="$HOME/.claude/settings.json"
+CONFIG="$HOME/.claude/claude-lifeline/config.toml"
 STATUS_LINE_CMD="~/.claude/bin/claude-lifeline"
 STATUS_LINE_JSON='{"type":"command","command":"~/.claude/bin/claude-lifeline"}'
+
+# ── Layout config helpers (~/.claude/claude-lifeline/config.toml) ──
+
+# 设置 [display] layout 为指定值（mini | auto | single | multi），保留其他配置
+set_layout() {
+  local layout="$1"
+  mkdir -p "$(dirname "$CONFIG")"
+  if [ ! -f "$CONFIG" ]; then
+    printf '[display]\nlayout = "%s"\n' "$layout" > "$CONFIG"
+    echo "Created $CONFIG with layout = \"$layout\""
+    return
+  fi
+  cp "$CONFIG" "$CONFIG.bak"
+  if grep -qE '^[[:space:]]*layout[[:space:]]*=' "$CONFIG"; then
+    # 替换已有 layout 行
+    sed -i.tmp -E "s|^[[:space:]]*layout[[:space:]]*=.*|layout = \"$layout\"|" "$CONFIG"
+    rm -f "$CONFIG.tmp"
+  elif grep -qE '^\[display\]' "$CONFIG"; then
+    # 在 [display] 段下追加（用临时文件以兼容 BSD/GNU sed）
+    awk -v layout="$layout" '
+      /^\[display\][[:space:]]*$/ { print; print "layout = \"" layout "\""; next }
+      { print }
+    ' "$CONFIG.bak" > "$CONFIG"
+  else
+    # 无 [display] 段，追加新段
+    printf '\n[display]\nlayout = "%s"\n' "$layout" >> "$CONFIG"
+  fi
+  echo "Set layout = \"$layout\" in $CONFIG (backup: config.toml.bak)"
+}
 
 # ── JSON helpers (jq preferred, sed fallback) ──
 
@@ -48,6 +78,16 @@ ACTION="${1:-install}"
 
 case "$ACTION" in
   install|upgrade) ;;
+  mini)
+    set_layout "mini"
+    echo "Done! Restart Claude Code to apply mini layout."
+    exit 0
+    ;;
+  standard)
+    set_layout "auto"
+    echo "Done! Restart Claude Code to apply standard layout."
+    exit 0
+    ;;
   uninstall)
     echo "Uninstalling claude-lifeline..."
     rm -f "$INSTALL_DIR/$BIN_NAME"
@@ -97,7 +137,7 @@ case "$ACTION" in
     exit 0
     ;;
   *)
-    echo "Usage: $0 [install|upgrade|uninstall|dev]"
+    echo "Usage: $0 [install|upgrade|uninstall|dev|mini|standard]"
     exit 1
     ;;
 esac

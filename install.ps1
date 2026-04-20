@@ -10,8 +10,52 @@ $Repo = "xjoker/claude-lifeline"
 $InstallDir = "$env:USERPROFILE\.claude\bin"
 $BinName = "claude-lifeline.exe"
 $Settings = "$env:USERPROFILE\.claude\settings.json"
+$Config = "$env:USERPROFILE\.claude\claude-lifeline\config.toml"
 $Target = "x86_64-pc-windows-msvc"
 $Action = if ($env:ACTION) { $env:ACTION } else { "install" }
+
+# ── Layout config helpers ──
+function Set-Layout {
+    param([string]$Layout)
+    $configDir = Split-Path $Config
+    if (-not (Test-Path $configDir)) {
+        New-Item -ItemType Directory -Force -Path $configDir | Out-Null
+    }
+    if (-not (Test-Path $Config)) {
+        Set-Content -Path $Config -Value "[display]`nlayout = `"$Layout`"" -Encoding UTF8
+        Write-Host "Created $Config with layout = `"$Layout`""
+        return
+    }
+    Copy-Item $Config "$Config.bak"
+    $lines = Get-Content $Config
+    if ($lines -match '^\s*layout\s*=') {
+        $lines = $lines | ForEach-Object {
+            if ($_ -match '^\s*layout\s*=') { "layout = `"$Layout`"" } else { $_ }
+        }
+        Set-Content -Path $Config -Value $lines -Encoding UTF8
+    } elseif ($lines -match '^\[display\]') {
+        $out = @()
+        foreach ($line in $lines) {
+            $out += $line
+            if ($line -match '^\[display\]\s*$') { $out += "layout = `"$Layout`"" }
+        }
+        Set-Content -Path $Config -Value $out -Encoding UTF8
+    } else {
+        Add-Content -Path $Config -Value "`n[display]`nlayout = `"$Layout`"" -Encoding UTF8
+    }
+    Write-Host "Set layout = `"$Layout`" in $Config (backup: config.toml.bak)"
+}
+
+if ($Action -eq "mini") {
+    Set-Layout "mini"
+    Write-Host "Done! Restart Claude Code to apply mini layout."
+    exit 0
+}
+if ($Action -eq "standard") {
+    Set-Layout "auto"
+    Write-Host "Done! Restart Claude Code to apply standard layout."
+    exit 0
+}
 
 # ── Uninstall ──
 

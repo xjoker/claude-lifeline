@@ -44,8 +44,8 @@ pub fn render(ctx: &RenderContext) {
     // [Model] — 青色
     let model_section = format!("{CYAN}[{model_name}]{RESET}");
 
-    // 项目名 — 黄色
-    let project_name = ctx
+    // cwd 层级 — 黄色，HOME 替换为 ~
+    let cwd_str = ctx
         .stdin
         .cwd
         .as_deref()
@@ -55,10 +55,8 @@ pub fn render(ctx: &RenderContext) {
                 .as_ref()
                 .and_then(|w| w.current_dir.as_deref())
         })
-        .and_then(|p| std::path::Path::new(p).file_name())
-        .and_then(|n| n.to_str())
         .unwrap_or("unknown");
-    let project_display = format!("{YELLOW}{project_name}{RESET}");
+    let project_display = format!("{YELLOW}{}{RESET}", abbrev_home(cwd_str));
 
     // git 部分 — git:() 品红，分支名青色，ahead/behind
     let git_section = if let Some(branch) = &ctx.git.branch {
@@ -258,6 +256,20 @@ fn char_width(c: char) -> usize {
 }
 
 // ── 私有辅助函数 ──
+
+/// 路径首部 HOME 替换为 `~`，跨平台兼容（HOME / USERPROFILE）
+fn abbrev_home(path: &str) -> String {
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_default();
+    if !home.is_empty() && path.starts_with(&home) {
+        let rest = &path[home.len()..];
+        if rest.is_empty() || rest.starts_with('/') || rest.starts_with('\\') {
+            return format!("~{rest}");
+        }
+    }
+    path.to_string()
+}
 
 /// 格式化 quota 后缀：(重置时间 ETA 耗尽预估)
 fn format_quota_suffix(
