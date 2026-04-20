@@ -46,13 +46,74 @@ function Set-Layout {
     Write-Host "Set layout = `"$Layout`" in $Config (backup: config.toml.bak)"
 }
 
+# ── Install 流程：下载最新二进制 + 配 settings.json（幂等，等同 upgrade） ──
+
+function Invoke-DoInstall {
+    Write-Host "Platform: Windows/x86_64 -> $Target"
+
+    $Latest = (Invoke-RestMethod "https://api.github.com/repos/$Repo/releases/latest").tag_name
+    if (-not $Latest) {
+        Write-Error "Failed to fetch latest release"
+        exit 1
+    }
+    $LatestVer = $Latest.TrimStart("v")
+
+    $needDownload = $true
+    if (Test-Path "$InstallDir\$BinName") {
+        try {
+            $Current = & "$InstallDir\$BinName" --version 2>$null
+            Write-Host "Current: $Current, Latest: $Latest"
+            if ($Current -eq "claude-lifeline $LatestVer") {
+                Write-Host "Binary already up to date."
+                $needDownload = $false
+            }
+        } catch {}
+    }
+
+    if ($needDownload) {
+        $Url = "https://github.com/$Repo/releases/download/$Latest/claude-lifeline-$Target.exe"
+        Write-Host "Downloading $Latest..."
+        New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+        Invoke-WebRequest -Uri $Url -OutFile "$InstallDir\$BinName"
+        Write-Host "Installed to $InstallDir\$BinName"
+    }
+
+    # 配 settings.json
+    if (Test-Path $Settings) {
+        $json = Get-Content $Settings -Raw | ConvertFrom-Json
+        $current = ""
+        if ($json.statusLine -and $json.statusLine.command) {
+            $current = $json.statusLine.command
+        }
+        if ($current -eq "~/.claude/bin/claude-lifeline") {
+            Write-Host "settings.json already configured"
+        } else {
+            Copy-Item $Settings "$Settings.bak"
+            $json | Add-Member -Force -MemberType NoteProperty -Name "statusLine" -Value @{
+                type = "command"
+                command = "~/.claude/bin/claude-lifeline"
+            }
+            $json | ConvertTo-Json -Depth 10 | Set-Content $Settings -Encoding UTF8
+            Write-Host "Updated settings.json (backup: settings.json.bak)"
+        }
+    } else {
+        New-Item -ItemType Directory -Force -Path (Split-Path $Settings) | Out-Null
+        @{statusLine = @{type = "command"; command = "~/.claude/bin/claude-lifeline"}} | ConvertTo-Json -Depth 10 | Set-Content $Settings -Encoding UTF8
+        Write-Host "Created $Settings"
+    }
+}
+
 if ($Action -eq "mini") {
+    Invoke-DoInstall
     Set-Layout "mini"
+    Write-Host ""
     Write-Host "Done! Restart Claude Code to apply mini layout."
     exit 0
 }
 if ($Action -eq "standard") {
+    Invoke-DoInstall
     Set-Layout "auto"
+    Write-Host ""
     Write-Host "Done! Restart Claude Code to apply standard layout."
     exit 0
 }
@@ -136,67 +197,13 @@ if ($Action -eq "dev") {
     exit 0
 }
 
-# ── Platform ──
+# ── Default: install or upgrade (treated identically) ──
 
-Write-Host "Platform: Windows/x86_64 -> $Target"
-
-# ── Version check ──
-
-$Latest = (Invoke-RestMethod "https://api.github.com/repos/$Repo/releases/latest").tag_name
-if (-not $Latest) {
-    Write-Error "Failed to fetch latest release"
+if ($Action -ne "install" -and $Action -ne "upgrade") {
+    Write-Error "Unknown action: $Action. Use install | upgrade | uninstall | dev | mini | standard"
     exit 1
 }
 
-# --version outputs "claude-lifeline 0.0.1", tag is "v0.0.1"
-$LatestVer = $Latest.TrimStart("v")
-
-if (Test-Path "$InstallDir\$BinName") {
-    try {
-        $Current = & "$InstallDir\$BinName" --version 2>$null
-        Write-Host "Current: $Current, Latest: $Latest"
-        if ($Current -eq "claude-lifeline $LatestVer") {
-            Write-Host "Already up to date."
-            exit 0
-        }
-    } catch {}
-}
-
-# ── Download ──
-
-$Url = "https://github.com/$Repo/releases/download/$Latest/claude-lifeline-$Target.exe"
-Write-Host "Downloading $Latest..."
-
-New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
-Invoke-WebRequest -Uri $Url -OutFile "$InstallDir\$BinName"
-
-Write-Host "Installed to $InstallDir\$BinName"
-
-# ── Configure settings.json ──
-
-if (Test-Path $Settings) {
-    $json = Get-Content $Settings -Raw | ConvertFrom-Json
-    $current = ""
-    if ($json.statusLine -and $json.statusLine.command) {
-        $current = $json.statusLine.command
-    }
-    if ($current -eq "~/.claude/bin/claude-lifeline") {
-        Write-Host "settings.json already configured"
-    } else {
-        Copy-Item $Settings "$Settings.bak"
-        $json | Add-Member -Force -MemberType NoteProperty -Name "statusLine" -Value @{
-            type = "command"
-            command = "~/.claude/bin/claude-lifeline"
-        }
-        $json | ConvertTo-Json -Depth 10 | Set-Content $Settings -Encoding UTF8
-        Write-Host "Updated settings.json (backup: settings.json.bak)"
-    }
-} else {
-    # Create settings.json if it doesn't exist
-    New-Item -ItemType Directory -Force -Path (Split-Path $Settings) | Out-Null
-    @{statusLine = @{type = "command"; command = "~/.claude/bin/claude-lifeline"}} | ConvertTo-Json -Depth 10 | Set-Content $Settings -Encoding UTF8
-    Write-Host "Created $Settings"
-}
-
+Invoke-DoInstall
 Write-Host ""
 Write-Host "Done! Restart Claude Code to see the new status line."

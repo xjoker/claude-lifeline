@@ -144,7 +144,7 @@ curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/insta
 & { $env:ACTION='standard'; irm https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.ps1 | iex }
 ```
 
-会编辑 `~/.claude/claude-lifeline/config.toml`，保留其他配置项。
+这两条命令会先跑完整的 install（如果有新版本会自动升级 binary，已最新则跳过下载），再把布局写入 `~/.claude/claude-lifeline/config.toml`，其他配置项保留不动。
 
 ### 卸载
 

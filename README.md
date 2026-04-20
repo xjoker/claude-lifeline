@@ -144,7 +144,7 @@ curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/insta
 & { $env:ACTION='standard'; irm https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.ps1 | iex }
 ```
 
-These edit `~/.claude/claude-lifeline/config.toml` and preserve any other settings.
+These run a full install (auto-upgrades the binary if a newer release is available, skips the download if already up to date), then write the layout to `~/.claude/claude-lifeline/config.toml` while preserving any other settings.
 
 ### Uninstall
 

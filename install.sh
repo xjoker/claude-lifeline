@@ -72,19 +72,99 @@ settings_has() {
   grep -q "\"command\".*\"$STATUS_LINE_CMD\"" "$SETTINGS" 2>/dev/null
 }
 
+# ── Install 流程：下载最新二进制 + 配 settings.json（幂等，等同 upgrade） ──
+
+do_install() {
+  # 平台检测
+  local OS ARCH TARGET
+  OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+  ARCH=$(uname -m)
+  case "$OS-$ARCH" in
+    darwin-arm64)    TARGET="aarch64-apple-darwin" ;;
+    darwin-x86_64)   TARGET="x86_64-apple-darwin" ;;
+    linux-x86_64)    TARGET="x86_64-unknown-linux-musl" ;;
+    linux-aarch64)   TARGET="aarch64-unknown-linux-musl" ;;
+    *)
+      echo "Error: unsupported platform $OS-$ARCH"
+      exit 1
+      ;;
+  esac
+  echo "Platform: $OS/$ARCH -> $TARGET"
+
+  # 拉最新版本号
+  local LATEST LATEST_VER
+  LATEST=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" \
+    | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+  if [ -z "$LATEST" ]; then
+    echo "Error: failed to fetch latest release"
+    exit 1
+  fi
+  LATEST_VER="${LATEST#v}"
+
+  # 已是最新就跳过下载（节省带宽，仍会更新 settings.json）
+  if [ -x "$INSTALL_DIR/$BIN_NAME" ]; then
+    local CURRENT
+    CURRENT=$("$INSTALL_DIR/$BIN_NAME" --version 2>/dev/null || echo "unknown")
+    echo "Current: $CURRENT, Latest: $LATEST"
+    if [ "$CURRENT" = "$BIN_NAME $LATEST_VER" ]; then
+      echo "Binary already up to date."
+    else
+      _download_binary "$LATEST" "$TARGET" "$OS"
+    fi
+  else
+    _download_binary "$LATEST" "$TARGET" "$OS"
+  fi
+
+  # 配 settings.json
+  if [ -f "$SETTINGS" ]; then
+    if settings_has; then
+      echo "settings.json already configured"
+    else
+      settings_add
+    fi
+  else
+    mkdir -p "$(dirname "$SETTINGS")"
+    printf '{\n  "statusLine": {"type": "command", "command": "%s"}\n}\n' "$STATUS_LINE_CMD" > "$SETTINGS"
+    echo "Created $SETTINGS"
+  fi
+}
+
+_download_binary() {
+  local LATEST="$1" TARGET="$2" OS="$3"
+  local URL="https://github.com/$REPO/releases/download/$LATEST/$BIN_NAME-$TARGET"
+  echo "Downloading $LATEST for $TARGET..."
+  mkdir -p "$INSTALL_DIR"
+  curl -fsSL "$URL" -o "$INSTALL_DIR/$BIN_NAME"
+  chmod +x "$INSTALL_DIR/$BIN_NAME"
+  # macOS: 移除 Gatekeeper 隔离标记
+  if [ "$OS" = "darwin" ]; then
+    xattr -d com.apple.quarantine "$INSTALL_DIR/$BIN_NAME" 2>/dev/null || true
+  fi
+  echo "Installed to $INSTALL_DIR/$BIN_NAME"
+}
+
 # ── 命令解析 ──
 
 ACTION="${1:-install}"
 
 case "$ACTION" in
-  install|upgrade) ;;
+  install|upgrade)
+    do_install
+    echo ""
+    echo "Done! Restart Claude Code to see the new status line."
+    exit 0
+    ;;
   mini)
+    do_install
     set_layout "mini"
+    echo ""
     echo "Done! Restart Claude Code to apply mini layout."
     exit 0
     ;;
   standard)
+    do_install
     set_layout "auto"
+    echo ""
     echo "Done! Restart Claude Code to apply standard layout."
     exit 0
     ;;
@@ -141,76 +221,3 @@ case "$ACTION" in
     exit 1
     ;;
 esac
-
-# ── 平台检测 ──
-
-OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-ARCH=$(uname -m)
-
-case "$OS-$ARCH" in
-  darwin-arm64)    TARGET="aarch64-apple-darwin" ;;
-  darwin-x86_64)   TARGET="x86_64-apple-darwin" ;;
-  linux-x86_64)    TARGET="x86_64-unknown-linux-musl" ;;
-  linux-aarch64)   TARGET="aarch64-unknown-linux-musl" ;;
-  *)
-    echo "Error: unsupported platform $OS-$ARCH"
-    exit 1
-    ;;
-esac
-
-echo "Platform: $OS/$ARCH -> $TARGET"
-
-# ── 版本检查 ──
-
-LATEST=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" \
-  | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
-
-if [ -z "$LATEST" ]; then
-  echo "Error: failed to fetch latest release"
-  exit 1
-fi
-
-# --version 输出 "claude-lifeline 0.0.1", tag 是 "v0.0.1"
-LATEST_VER="${LATEST#v}"
-
-if [ "$ACTION" = "upgrade" ] && [ -x "$INSTALL_DIR/$BIN_NAME" ]; then
-  CURRENT=$("$INSTALL_DIR/$BIN_NAME" --version 2>/dev/null || echo "unknown")
-  echo "Current: $CURRENT, Latest: $LATEST"
-  if [ "$CURRENT" = "$BIN_NAME $LATEST_VER" ]; then
-    echo "Already up to date."
-    exit 0
-  fi
-fi
-
-# ── 下载 ──
-
-URL="https://github.com/$REPO/releases/download/$LATEST/$BIN_NAME-$TARGET"
-echo "Downloading $LATEST for $TARGET..."
-
-mkdir -p "$INSTALL_DIR"
-curl -fsSL "$URL" -o "$INSTALL_DIR/$BIN_NAME"
-chmod +x "$INSTALL_DIR/$BIN_NAME"
-
-# macOS: 移除 Gatekeeper 隔离标记
-if [ "$OS" = "darwin" ]; then
-  xattr -d com.apple.quarantine "$INSTALL_DIR/$BIN_NAME" 2>/dev/null || true
-fi
-
-echo "Installed to $INSTALL_DIR/$BIN_NAME"
-
-# ── 配置 settings.json ──
-
-if [ -f "$SETTINGS" ]; then
-  if settings_has; then
-    echo "settings.json already configured"
-  else
-    settings_add
-  fi
-else
-  mkdir -p "$(dirname "$SETTINGS")"
-  printf '{\n  "statusLine": {"type": "command", "command": "%s"}\n}\n' "$STATUS_LINE_CMD" > "$SETTINGS"
-  echo "Created $SETTINGS"
-fi
-
-echo ""
-echo "Done! Restart Claude Code to see the new status line."
