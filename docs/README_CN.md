@@ -120,6 +120,23 @@ curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/insta
 
 Windows：重新运行安装命令即可 — 已是最新版本时会自动跳过。
 
+### 切换布局
+
+```bash
+# macOS / Linux — 切到 mini 紧凑色块布局
+curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.sh | bash -s mini
+# 切回标准两行布局
+curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.sh | bash -s standard
+```
+
+```powershell
+# Windows
+& { $env:ACTION='mini';     irm https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.ps1 | iex }
+& { $env:ACTION='standard'; irm https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.ps1 | iex }
+```
+
+会编辑 `~/.claude/claude-lifeline/config.toml`，保留其他配置项。
+
 ### 卸载
 
 ```bash
@@ -161,9 +178,9 @@ ctx █████░░░░░ 53%  │  5h ████░░|░░░░ 
 
 | 颜色 | 阈值 | 含义 |
 |------|------|------|
-| 绿色 | `< 70%` | 余量充足 |
-| 黄色 | `70–85%` | 接近上限 |
-| 红色 | `≥ 85%` | 即将用尽 |
+| 绿色 | `< 60%` | 余量充足 |
+| 黄色 | `60–70%` | 接近上限 |
+| 红色 | `≥ 70%` | 即将用尽 |
 
 当上下文使用率 **≥ 85%** 时，显示 token 用量明细：
 

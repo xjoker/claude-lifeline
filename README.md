@@ -120,6 +120,23 @@ curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/insta
 
 Windows: re-run the install command — it auto-detects and skips if already up to date.
 
+### Switch Layout
+
+```bash
+# macOS / Linux — switch to the compact mini layout (single-line color blocks)
+curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.sh | bash -s mini
+# back to the standard 2-line layout
+curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.sh | bash -s standard
+```
+
+```powershell
+# Windows
+& { $env:ACTION='mini';     irm https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.ps1 | iex }
+& { $env:ACTION='standard'; irm https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.ps1 | iex }
+```
+
+These edit `~/.claude/claude-lifeline/config.toml` and preserve any other settings.
+
 ### Uninstall
 
 ```bash
@@ -161,9 +178,9 @@ Context window         5-hour quota                     7-day quota
 
 | Color | Threshold | Meaning |
 |-------|-----------|---------|
-| Green | `< 70%` | Comfortable headroom |
-| Yellow | `70–85%` | Getting close |
-| Red | `≥ 85%` | Approaching limit |
+| Green | `< 60%` | Comfortable headroom |
+| Yellow | `60–70%` | Getting close |
+| Red | `≥ 70%` | Approaching limit |
 
 When context reaches **≥ 85%**, a token breakdown appears:
 
