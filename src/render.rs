@@ -1,4 +1,4 @@
-use crate::config::{Config, Layout};
+use crate::config::{Config, Layout, Thresholds};
 use crate::git::GitInfo;
 use crate::input::StdinData;
 use crate::usage::UsageData;
@@ -92,11 +92,13 @@ pub fn render(ctx: &RenderContext) {
     let mut segments: Vec<String> = Vec::new();
 
     // Segment 1: Context（可配置，>= 85% 时显示 token 明细）
+    let t = &ctx.config.thresholds;
+
     if ctx.config.display.context {
         let ctx_pct = crate::input::get_context_percent(&ctx.stdin);
-        let ctx_color = get_context_color(ctx_pct);
+        let ctx_color = get_context_color(ctx_pct, t);
         let ctx_bar = render_bar_with_pace(ctx_pct, None, 10, ctx_color);
-        let token_detail = if ctx_pct >= 85.0 {
+        let token_detail = if ctx_pct >= t.ctx_token_detail_at {
             ctx.stdin.context_window.as_ref()
                 .and_then(|cw| cw.current_usage.as_ref())
                 .map(|u| {
@@ -118,9 +120,9 @@ pub fn render(ctx: &RenderContext) {
     // Segment 2: 5h quota（可配置）
     if ctx.config.display.five_hour {
         if let Some(five_hour) = &ctx.usage.five_hour {
-            let pace = crate::usage::calc_pace(five_hour, crate::usage::WINDOW_5H_SECS);
+            let pace = crate::usage::calc_pace(five_hour, crate::usage::WINDOW_5H_SECS, t.pace_tolerance);
             let over = pace.as_ref().is_some_and(|p| p.direction == crate::usage::PaceDirection::Over);
-            let color = get_quota_color_with_pace(five_hour.used_percent, over);
+            let color = get_quota_color_with_pace(five_hour.used_percent, over, t.five_hour_yellow_at, t.five_hour_red_at);
             let pace_pct = pace.as_ref().map(|p| p.pace_percent);
             let bar = render_bar_with_pace(five_hour.used_percent, pace_pct, 10, color);
             let suffix = format_quota_suffix(&five_hour.resets_at, &pace);
@@ -137,9 +139,9 @@ pub fn render(ctx: &RenderContext) {
     // Segment 3: 7d quota（可配置）
     if ctx.config.display.seven_day {
         if let Some(seven_day) = &ctx.usage.seven_day {
-            let pace = crate::usage::calc_pace(seven_day, crate::usage::WINDOW_7D_SECS);
+            let pace = crate::usage::calc_pace(seven_day, crate::usage::WINDOW_7D_SECS, t.pace_tolerance);
             let over = pace.as_ref().is_some_and(|p| p.direction == crate::usage::PaceDirection::Over);
-            let color = get_quota_color_with_pace(seven_day.used_percent, over);
+            let color = get_quota_color_with_pace(seven_day.used_percent, over, t.seven_day_yellow_at, t.seven_day_red_at);
             let pace_pct = pace.as_ref().map(|p| p.pace_percent);
             let bar = render_bar_with_pace(seven_day.used_percent, pace_pct, 10, color);
             let suffix = format_quota_suffix(&seven_day.resets_at, &pace);
@@ -413,22 +415,22 @@ fn render_bar_with_pace(used_pct: f64, pace_pct: Option<f64>, width: usize, colo
     result
 }
 
-/// Context 颜色阈值
-fn get_context_color(percent: f64) -> &'static str {
-    if percent < 60.0 {
-        GREEN
-    } else if percent < 70.0 {
+/// Context 颜色阈值（可配置）
+fn get_context_color(percent: f64, t: &Thresholds) -> &'static str {
+    if percent >= t.ctx_red_at {
+        RED
+    } else if percent >= t.ctx_yellow_at {
         YELLOW
     } else {
-        RED
+        GREEN
     }
 }
 
-/// Quota 颜色阈值（考虑超速状态）
-fn get_quota_color_with_pace(percent: f64, over_pace: bool) -> &'static str {
-    if percent >= 90.0 {
+/// Quota 颜色阈值（考虑超速状态，yellow/red 阈值来自配置）
+fn get_quota_color_with_pace(percent: f64, over_pace: bool, yellow_at: f64, red_at: f64) -> &'static str {
+    if percent >= red_at {
         RED
-    } else if over_pace || percent >= 75.0 {
+    } else if over_pace || percent >= yellow_at {
         YELLOW
     } else {
         BRIGHT_BLUE
@@ -508,22 +510,22 @@ fn model_block_bg(name: &str) -> u8 {
     }
 }
 
-/// ctx 色块底色（统一阈值：<60 绿 / <70 黄 / >=70 红）
-fn ctx_block_colors(pct: f64) -> (u8, u8) {
-    if pct < 60.0 {
-        (BG_CTX_SAFE, FG_DARK)
-    } else if pct < 70.0 {
+/// ctx 色块底色（阈值来自配置）
+fn ctx_block_colors(pct: f64, t: &Thresholds) -> (u8, u8) {
+    if pct >= t.ctx_red_at {
+        (BG_DANGER, FG_DARK)
+    } else if pct >= t.ctx_yellow_at {
         (BG_WARN, FG_DARK)
     } else {
-        (BG_DANGER, FG_DARK)
+        (BG_CTX_SAFE, FG_DARK)
     }
 }
 
-/// quota 色块底色（>=90 红 / 超速或>=75 黄 / 否则蓝）
-fn quota_block_colors(pct: f64, over: bool) -> (u8, u8) {
-    if pct >= 90.0 {
+/// quota 色块底色（阈值来自配置；5h / 7d 独立）
+fn quota_block_colors(pct: f64, over: bool, yellow_at: f64, red_at: f64) -> (u8, u8) {
+    if pct >= red_at {
         (BG_DANGER, FG_DARK)
-    } else if over || pct >= 75.0 {
+    } else if over || pct >= yellow_at {
         (BG_WARN, FG_DARK)
     } else {
         (BG_QUOTA_SAFE, FG_DARK)
@@ -531,12 +533,19 @@ fn quota_block_colors(pct: f64, over: bool) -> (u8, u8) {
 }
 
 /// quota 色块（5h / 7d）：`U/P% L` 或超速时 `U/P%! L ETA HH:MM`
-fn quota_block(w: &crate::usage::WindowUsage, window_secs: i64, label: &str) -> String {
-    let pace = crate::usage::calc_pace(w, window_secs);
+fn quota_block(
+    w: &crate::usage::WindowUsage,
+    window_secs: i64,
+    label: &str,
+    yellow_at: f64,
+    red_at: f64,
+    pace_tolerance: f64,
+) -> String {
+    let pace = crate::usage::calc_pace(w, window_secs, pace_tolerance);
     let pace_pct = pace.as_ref().map(|p| p.pace_percent).unwrap_or(0.0);
     let over = pace.as_ref().is_some_and(|p| p.direction == crate::usage::PaceDirection::Over);
 
-    let (bg, fg) = quota_block_colors(w.used_percent, over);
+    let (bg, fg) = quota_block_colors(w.used_percent, over, yellow_at, red_at);
     let alert = if over { "!" } else { "" };
 
     let eta_str = if over {
@@ -616,24 +625,40 @@ fn render_mini(ctx: &RenderContext) {
         ));
     }
 
+    let t = &ctx.config.thresholds;
+
     // ctx
     if ctx.config.display.context {
         let ctx_pct = crate::input::get_context_percent(&ctx.stdin);
-        let (bg, fg) = ctx_block_colors(ctx_pct);
+        let (bg, fg) = ctx_block_colors(ctx_pct, t);
         metrics.push(block(bg, fg, &format!("ctx {ctx_pct:.0}%")));
     }
 
     // 5h
     if ctx.config.display.five_hour {
         if let Some(w) = &ctx.usage.five_hour {
-            metrics.push(quota_block(w, crate::usage::WINDOW_5H_SECS, "5h"));
+            metrics.push(quota_block(
+                w,
+                crate::usage::WINDOW_5H_SECS,
+                "5h",
+                t.five_hour_yellow_at,
+                t.five_hour_red_at,
+                t.pace_tolerance,
+            ));
         }
     }
 
     // 7d
     if ctx.config.display.seven_day {
         if let Some(w) = &ctx.usage.seven_day {
-            metrics.push(quota_block(w, crate::usage::WINDOW_7D_SECS, "7d"));
+            metrics.push(quota_block(
+                w,
+                crate::usage::WINDOW_7D_SECS,
+                "7d",
+                t.seven_day_yellow_at,
+                t.seven_day_red_at,
+                t.pace_tolerance,
+            ));
         }
     }
 

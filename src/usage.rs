@@ -140,8 +140,8 @@ pub async fn get_usage_data(rate_limits: Option<&RateLimits>) -> UsageData {
     }
 }
 
-/// 计算配速信息
-pub fn calc_pace(window: &WindowUsage, window_secs: i64) -> Option<PaceInfo> {
+/// 计算配速信息（tolerance 为超速容差百分比，used > pace + tolerance 才算超速）
+pub fn calc_pace(window: &WindowUsage, window_secs: i64, tolerance: f64) -> Option<PaceInfo> {
     let resets_at = window.resets_at.as_ref()?;
     let now = Utc::now();
     let remaining_secs = (*resets_at - now).num_seconds();
@@ -149,7 +149,7 @@ pub fn calc_pace(window: &WindowUsage, window_secs: i64) -> Option<PaceInfo> {
 
     let pace_percent = ((elapsed_secs as f64 / window_secs as f64) * 100.0).clamp(0.0, 100.0);
 
-    let direction = if window.used_percent > pace_percent {
+    let direction = if window.used_percent > pace_percent + tolerance {
         PaceDirection::Over
     } else if window.used_percent < pace_percent {
         PaceDirection::Under

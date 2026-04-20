@@ -11,5 +11,19 @@ layout = "auto"    # 布局: auto | single | multi | mini
                    #   single — 强制单行（可能被终端截断）
                    #   multi  — 强制每段独占一行
                    #   mini   — 极简色块单行：模型/项目/git/ctx/5h/7d 全压缩
-                   #            ctx <60 绿 / <70 黄 / >=70 红
-                   #            quota 超速 或 >=75 黄, >=90 红, 否则蓝
+
+# 颜色切换阈值（可选；缺省使用下列默认值）
+# 校验规则：yellow 必须 < red，且都在 [0, 100]；不合法时该对回退默认
+[thresholds]
+ctx_yellow_at       = 60.0   # ctx >= 该值 → 黄
+ctx_red_at          = 70.0   # ctx >= 该值 → 红
+ctx_token_detail_at = 85.0   # ctx >= 该值：standard 模式附加 (in:Xk c:Yk)
+
+# 5h / 7d quota 独立配置（默认 7d 比 5h 更宽松，因为 7d 窗口更长）
+five_hour_yellow_at = 75.0
+five_hour_red_at    = 90.0
+seven_day_yellow_at = 80.0
+seven_day_red_at    = 90.0
+
+# 超速容差（%）：used > pace + tolerance 才算超速。0 = 严格（任何超出即告警）
+pace_tolerance      = 0.0
