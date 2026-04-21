@@ -201,9 +201,11 @@ pub fn render(ctx: &RenderContext) {
     }
 }
 
-/// 探测终端列宽，COLUMNS 环境变量 → /dev/tty → 120 兜底
+/// 探测终端列宽，优先级：COLUMNS env → stdout/stderr/stdin tty → /dev/tty → 80 兜底
 ///
-/// COLUMNS 优先，方便 Claude Code / 用户通过环境变量显式覆盖
+/// Claude Code 把 stdin/stdout 都管道化，`terminal_size()` 通常 3 个 fd 全失败，
+/// 必须额外打开 /dev/tty 去 ioctl。默认 80 比之前的 120 保守，避免在未知宽度
+/// 时过度乐观导致拆行不触发
 fn detect_terminal_width() -> usize {
     if let Ok(cols) = std::env::var("COLUMNS") {
         if let Ok(w) = cols.parse::<usize>() {
@@ -217,7 +219,23 @@ fn detect_terminal_width() -> usize {
             return w as usize;
         }
     }
-    120
+    if let Some(w) = probe_tty_width() {
+        return w;
+    }
+    80
+}
+
+/// Unix 下打开 /dev/tty 直接 ioctl 查宽度，绕过 CC 的 pipe
+#[cfg(unix)]
+fn probe_tty_width() -> Option<usize> {
+    let f = std::fs::File::open("/dev/tty").ok()?;
+    let (terminal_size::Width(w), _) = terminal_size::terminal_size_of(&f)?;
+    (w > 0).then_some(w as usize)
+}
+
+#[cfg(not(unix))]
+fn probe_tty_width() -> Option<usize> {
+    None
 }
 
 /// 剥离 ANSI 转义码后按字符数量估算视觉宽度（窄字符按 1 计，CJK 等宽字符按 2 计）
@@ -581,11 +599,14 @@ fn quota_block_colors(pct: f64, over: bool, yellow_at: f64, red_at: f64) -> (u8,
     }
 }
 
-/// quota 色块（5h / 7d）：`U/P% L` 或超速时 `U/P%! L ETA HH:MM`
+/// quota 色块（5h / 7d）：极简格式
+///   正常: `U/P%`
+///   超速: `U/P%! →HH:MM ↓45m`   (ETA 用 → 前缀、wait 用 ↓ 前缀；5h/7d label 砍掉)
+/// 两块靠位置/顺序区分：5h 永远在 7d 左边
 fn quota_block(
     w: &crate::usage::WindowUsage,
     window_secs: i64,
-    label: &str,
+    _label: &str,  // 保留参数供未来扩展；mini 极简模式不显示
     yellow_at: f64,
     red_at: f64,
     pace_tolerance: f64,
@@ -597,29 +618,53 @@ fn quota_block(
     let (bg, fg) = quota_block_colors(w.used_percent, over, yellow_at, red_at);
     let alert = if over { "!" } else { "" };
 
-    let eta_str = if over {
-        pace.as_ref()
+    let (eta_str, wait_str) = if over {
+        let eta = pace
+            .as_ref()
             .and_then(|p| p.depletion_eta.as_ref())
             .map(|eta| {
                 let local: chrono::DateTime<chrono::Local> = eta.with_timezone(&chrono::Local);
                 let today = chrono::Local::now().date_naive();
                 let fmt = if local.date_naive() == today {
-                    local.format("%H:%M").to_string()
+                    local.format("%-H:%M").to_string()
                 } else {
-                    local.format("%-m/%-d %H:%M").to_string()
+                    local.format("%-m/%-d %-H:%M").to_string()
                 };
-                format!(" ETA {fmt}")
+                format!(" →{fmt}")
             })
-            .unwrap_or_default()
+            .unwrap_or_default();
+        let wait = pace
+            .as_ref()
+            .and_then(|p| p.recovery_secs)
+            .map(|secs| format!(" ↓{}", format_short_duration(secs)))
+            .unwrap_or_default();
+        (eta, wait)
     } else {
-        String::new()
+        (String::new(), String::new())
     };
 
     let text = format!(
-        "{:.0}/{:.0}%{alert} {label}{eta_str}",
+        "{:.0}/{:.0}%{alert}{eta_str}{wait_str}",
         w.used_percent, pace_pct
     );
     block(bg, fg, &text)
+}
+
+/// 紧凑时长：<1m→"1m"，<1h→"Xm"，<1d→"XhYm"（省空格）, >=1d→"XdYh"
+fn format_short_duration(secs: i64) -> String {
+    if secs < 60 {
+        "1m".to_string()
+    } else if secs < 3600 {
+        format!("{}m", secs / 60)
+    } else if secs < 86400 {
+        let h = secs / 3600;
+        let m = (secs % 3600) / 60;
+        if m == 0 { format!("{h}h") } else { format!("{h}h{m}m") }
+    } else {
+        let d = secs / 86400;
+        let h = (secs % 86400) / 3600;
+        if h == 0 { format!("{d}d") } else { format!("{d}d{h}h") }
+    }
 }
 
 /// Mini 模式：所有信息压缩为色块串，按宽度自适应拆行
