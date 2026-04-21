@@ -2,6 +2,31 @@
 
 All notable changes to claude-lifeline will be documented in this file.
 
+## [0.0.6] - 2026-04-21
+
+### Changed
+- **Mini quota blocks minimized** — dropped the trailing `5h` / `7d`
+  label (the two blocks are always in that order, so position alone
+  identifies them), replaced `ETA ` with `→` and `wait ` with `↓`, and
+  stripped leading zeros from times (`9:26` not `09:26`). Over-pace
+  block went from `90/80%! 5h ETA 16:56 wait 29m` (31 cols) to
+  `90/80%! →16:56 ↓29m` (19 cols); a normal quota block is now `40/80%`
+  (8 cols).
+
+### Fixed
+- **Terminal width detection when Claude Code pipes stdin/stdout** —
+  `terminal_size()` could not locate a tty via any of the std fds in
+  the statusline subprocess, so the default fell back to 120 columns
+  and the mini-layout wrap logic never fired on ~80-col terminals.
+  Added a `/dev/tty` fallback (Unix only) via `terminal_size_of`, and
+  lowered the final hard default from 120 to 80 so width-unknown
+  machines fail closed on wrapping rather than truncating output.
+- **`!` and `↓wait` out of sync for sub-percent over-pace** —
+  `calc_pace()` flagged any positive overrun as Over but dropped
+  `recovery_secs` when fractional-second math truncated to zero,
+  producing `50/50%!` with no `↓` hint on very small deltas. Over
+  now emits `Some(max(secs, 1))` so the two signals always pair.
+
 ## [0.0.5] - 2026-04-20
 
 ### Added
