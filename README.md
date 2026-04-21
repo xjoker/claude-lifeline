@@ -163,15 +163,24 @@ curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/insta
 ### Line 1 — Session Info
 
 ```
-[Opus 4.6]  my-project  git:(main* ↑2)  1h 23m
- ^^^^^^^^^   ^^^^^^^^^^      ^^^^^^^^^   ^^^^^^
- Model       Project name   Git status   Session duration
+[Opus 4.7]  ~/Developer/Repos/my-project  git:(main* ↑2)  +1.3k -344  1h 23m
+ ^^^^^^^^^   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^      ^^^^^^^^^    ^^^^^^^^^   ^^^^^^
+ Model       CWD (HOME → ~)              Git status       Edit stats   Session duration
 ```
 
-- **Model** — display name from Claude Code (e.g., `Sonnet 4.6`, `Opus 4.6`, `Haiku 4.5`)
-- **Project name** — current working directory name
-- **Git status** — branch, dirty flag (`*`), ahead (`↑N` green) / behind (`↓N` red) upstream
+- **Model** — display name from Claude Code (e.g., `Sonnet 4.6`, `Opus 4.7`, `Haiku 4.5`, or `Opus 4.7 (1M context)`)
+- **CWD** — full path with `$HOME` collapsed to `~`
+- **Git status** — branch, dirty flag (`*`), ahead (`↑N` green) / behind (`↓N` red) upstream. Omitted entirely when `cwd` is not inside a git repo or when `git` isn't on `$PATH`.
+- **Edit stats** — lines Claude Code added (`+N` green) and removed (`-N` red) during the current session. Only rendered when either is non-zero; toggle with `display.edit_stats = false`. See note below on what's counted.
 - **Session duration** — elapsed time since session start, shown in dim text
+
+> **About edit stats**: the `+X -Y` figures come from Claude Code's
+> `cost.total_lines_added` / `total_lines_removed` — a session-scoped
+> counter that tallies every line touched by the Edit and Write tools.
+> It is **not** filtered by `.gitignore`, and it does **not** correspond
+> to `git diff` against any commit; it simply reflects how much work
+> Claude did this session, including edits to build artefacts or
+> gitignored scratch files. Reset when you start a new session.
 
 ### Line 2 — Resource Usage
 
@@ -413,6 +422,8 @@ Optional config file at `~/.claude/claude-lifeline/config.toml`.
 context = true     # Context window segment
 five_hour = true   # 5-hour quota segment
 seven_day = true   # 7-day quota segment
+edit_stats = true  # +lines_added / -lines_removed from Claude Code's session counter
+                   # (NOT filtered by .gitignore; see "Edit stats" note above)
 layout = "auto"    # Layout: auto | single | multi | mini
                    #   auto   — detect terminal width; wrap per-segment if too narrow
                    #   single — always single line (may be truncated)

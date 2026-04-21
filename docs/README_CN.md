@@ -163,15 +163,22 @@ curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/insta
 ### 第一行 — 会话信息
 
 ```
-[Opus 4.6]  my-project  git:(main* ↑2)  1h 23m
- ^^^^^^^^^   ^^^^^^^^^^      ^^^^^^^^^   ^^^^^^
- 模型         项目名称        Git 状态    会话时长
+[Opus 4.7]  ~/Developer/Repos/my-project  git:(main* ↑2)  +1.3k -344  1h 23m
+ ^^^^^^^^^   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^      ^^^^^^^^^    ^^^^^^^^^   ^^^^^^
+ 模型         项目路径（HOME → ~）           Git 状态        改动量      会话时长
 ```
 
-- **模型** — Claude Code 提供的模型显示名称（如 `Sonnet 4.6`、`Opus 4.6`、`Haiku 4.5`）
-- **项目名称** — 当前工作目录名
-- **Git 状态** — 分支名、脏标记（`*`）、领先（`↑N` 绿色）/ 落后（`↓N` 红色）上游
-- **会话时长** — 会话启动以来的经过时间，暗色显示
+- **模型** — Claude Code 提供的 display_name（如 `Sonnet 4.6`、`Opus 4.7`、`Haiku 4.5`、`Opus 4.7 (1M context)`）
+- **项目路径** — cwd 完整路径，`$HOME` 折叠为 `~`
+- **Git 状态** — 分支名、脏标记（`*`）、领先（`↑N` 绿色）/ 落后（`↓N` 红色）上游。cwd 不在 git 仓库或 `git` 不在 `$PATH` 时**整段省略**，不留空位
+- **代码改动量** — 本会话 Claude 新增 `+N` 绿 / 删除 `-N` 红的行数。仅当两者任一非零才显示，可用 `display.edit_stats = false` 关闭。语义见下方说明
+- **会话时长** — 从 session 启动起的经过时间，暗色显示
+
+> **改动量数据说明**：`+X -Y` 来自 Claude Code 的 `cost.total_lines_added` /
+> `total_lines_removed`——这是**会话级**累计计数器，统计 Edit 和 Write 工具
+> 调用涉及的每一行。它**不会**过滤 `.gitignore`，也**不**对应任何 `git diff`
+> 的结果。它反映的是"本次会话 Claude 干了多少活"，包括改动构建产物和 ignored
+> 的草稿文件。新开 session 后重置。
 
 ### 第二行 — 资源使用
 
@@ -413,6 +420,8 @@ mini 模式为保持紧凑，省略以下信息：
 context = true     # context window 段
 five_hour = true   # 5h quota 段
 seven_day = true   # 7d quota 段
+edit_stats = true  # 代码改动量 +X -Y（来自 CC 会话计数器，不过滤 .gitignore；
+                   # 详见上方"改动量数据说明"）
 layout = "auto"    # 布局: auto | single | multi | mini
                    #   auto   — 按终端宽度自动选择（窄则每段独占一行）
                    #   single — 强制单行（可能被截断）
