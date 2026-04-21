@@ -176,10 +176,12 @@ pub fn calc_pace(window: &WindowUsage, window_secs: i64, tolerance: f64) -> Opti
 
     // 恢复时间：超速时停工多久可以让配速追平用量
     // recovery_secs = (used - pace) / (100 / window_secs) = (used - pace) * window_secs / 100
+    // 保底 1 秒：direction==Over 时永远返回 Some，和 `!` 标记保持一致
+    // （否则亚百分点超速会走 truncation → 0 → None，用户只见 `!` 不见 `↓`，语义打架）
     let recovery_secs = if direction == PaceDirection::Over {
         let delta = window.used_percent - pace_percent;
         let secs = (delta * window_secs as f64 / 100.0) as i64;
-        if secs > 0 { Some(secs) } else { None }
+        Some(secs.max(1))
     } else {
         None
     };
