@@ -2,6 +2,97 @@
 
 All notable changes to claude-lifeline will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **Independent cache segment** — cache info (hit rate + TTL countdown)
+  now renders as its own segment between `ctx` and `5h`, no longer
+  embedded in the `ctx` block. Standard mode: `cache 96% 4m12s`; mini:
+  a separate label-less block sized like `5h` / `7d`. Hit rate is
+  `cache_read / (input + cache_read + cache_creation)` from the most
+  recent API call. Color-coded for at-a-glance anomaly detection:
+  - real TTL expiry (60s window) → red `expired`
+  - hit rate < 30% → yellow (cache rebuild in progress)
+  - normal → cyan (standard) / blue background (mini)
+  Hidden when `current_usage` is null and there's no expiry to report.
+  Toggle via `display.cache_hit` (default `true`). Anthropic exposes no
+  server-side cache state API, so this reflects the most recent turn's
+  cache behavior — not session totals.
+- **Cache TTL countdown** — when cache is alive, an estimated
+  remaining-life timer follows the hit rate inside the cache segment:
+  `cache 96% 4m12s`. Predicts expiry as `last_observed_hit_time + 5min`,
+  refreshed on every new API call. Disappears when cache_read drops to
+  0 (cache died) or the predicted TTL has elapsed. State persisted at
+  `~/.claude/claude-lifeline/cache-ttl-<session_id>.json`. Useful when
+  returning from a long pause: visible timer means "context still
+  cached, send freely"; absent timer means "next message pays
+  cache_creation cost."
+- **Cache decision diagnostic log** — every cache_read transition is
+  classified and appended to
+  `~/.claude/claude-lifeline/cache-decisions.jsonl`:
+  ```json
+  {"ts":...,"session":"...","category":"real_expiry|compact_or_first|new_call",
+   "prev_cache_read":N,"cache_read":M,"cache_creation":X,"input":Y,
+   "ratio":..., "elapsed_since_prev_secs":...}
+  ```
+  Lets you audit "why didn't we record a TTL sample?" — the
+  `compact_or_first` rows show classification details, so the
+  `cache_creation >= input * 2` heuristic can be tuned against real
+  data. Same-call repeated observations are not logged (noise). Auto-
+  compacts at 200KB / 1000 rows / 90 days, atomic-rename rotation.
+
+### Added
+- **TTL sample collection (Phase 1, opt-out: just delete the file)** —
+  every confirmed real-expiry event records one sample to
+  `~/.claude/claude-lifeline/ttl-samples.jsonl`:
+  ```json
+  {"ts":1778048545,"observed_ttl_secs":287,"cache_creation":150000,"input":50,"prev_cache_read":150000}
+  ```
+  Phase 2 (future) will use these to calibrate the TTL prediction
+  against Anthropic's real behavior. Phase 1 only collects.
+  Auto-compacts when file exceeds 50KB: drops samples older than 90 days,
+  caps to last 200 samples. Concurrent multi-session writes are atomic
+  (POSIX `O_APPEND` for lines < 4KB; compact uses tempfile + rename).
+- **Real cache expiry detection (post-hoc)** — when the next API call
+  after an idle period returns `cache_read = 0`, the renderer
+  distinguishes two causes via the `cache_creation : input_tokens`
+  ratio:
+  - `cache_creation >= input_tokens * 2` → real TTL expiry, prefix
+    rebuilt server-side. Cache segment shows red `expired` (standard)
+    / red-background `expired` block (mini) for the next 60 seconds.
+  - `cache_creation < input_tokens * 2` → likely `/compact` or new
+    session, no `expired` hint shown.
+
+  This is the only ground-truth signal Anthropic exposes — there is no
+  cache-state query API. The hint tells you "the message you just sent
+  paid the cache_creation premium because the cache had died."
+
+### Fixed
+- **Cache TTL countdown stuck at 5m with multiple CC terminals open** —
+  state was persisted to a single `cache-ttl.json`, so each CC session's
+  refresh would overwrite it with its own session_id. Subsequent reads
+  treated the differing session_id as "new API call" and reset
+  `last_active_at = now`, so the countdown never decreased below ~15s.
+  State now lives in `cache-ttl-<session_id>.json` per session, isolated
+  from concurrent terminals.
+
+### Changed
+- **Install scripts now set `refreshInterval: 15`** in `settings.json`'s
+  `statusLine` block. Without this, Claude Code only re-runs the
+  statusline on assistant-message / `/compact` / permission events —
+  cache TTL countdowns and quota ETAs would freeze during idle. 15s is
+  a balance between visual smoothness and CPU cost (~30ms per run).
+  Existing user customization (e.g., `refreshInterval: 30`) is preserved
+  on upgrade; the default is only applied when the field is missing.
+
+### Removed
+- **`(in:Xk c:Yk)` token detail at ctx >= 85%** — superseded by the
+  always-on `cXX%` cache hit rate, which conveys the same cache-vs-fresh
+  signal in 5 columns instead of 18. The `ctx_token_detail_at` threshold
+  config field has been removed; existing config files with this key
+  will continue to load (TOML extra-key tolerance) but the value is
+  ignored.
+
 ## [0.0.6] - 2026-04-21
 
 ### Changed

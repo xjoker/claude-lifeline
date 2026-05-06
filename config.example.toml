@@ -8,6 +8,12 @@ five_hour = true   # 5h quota 段
 seven_day = true   # 7d quota 段
 edit_stats = true  # 代码改动量 +X -Y（standard 模式 dim 挂在 git 后面，
                    # mini 模式并入 git 色块。仅当 session 有增删时渲染）
+cache_hit = true   # 显示独立 cache 段（命中率 + TTL 倒计时）
+                   # 标准布局：`cache 96% 4m12s`；mini：紧跟 ctx 后的独立色块
+                   # 颜色：expired→红 / 命中率<30%→黄 / 否则→青（mini 蓝底）
+                   # 命中率：cache_read / 总输入 token（仅最近一次 API 调用）
+                   # 倒计时：last_observed_hit + 5min - now，预估 cache 还能活多久
+                   # current_usage 为 null（首条/compact 后）或 cache 已死时不显示
 layout = "auto"    # 布局: auto | single | multi | mini
                    #   auto   — 按终端宽度自动选择（窄则每段独占一行）
                    #   single — 强制单行（可能被终端截断）
@@ -19,7 +25,6 @@ layout = "auto"    # 布局: auto | single | multi | mini
 [thresholds]
 ctx_yellow_at       = 60.0   # ctx >= 该值 → 黄
 ctx_red_at          = 70.0   # ctx >= 该值 → 红
-ctx_token_detail_at = 85.0   # ctx >= 该值：standard 模式附加 (in:Xk c:Yk)
 
 # 5h / 7d quota 独立配置（默认 7d 比 5h 更宽松，因为 7d 窗口更长）
 five_hour_yellow_at = 75.0

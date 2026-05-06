@@ -62,9 +62,9 @@ Share this repo URL with Claude Code — it will read the instructions below and
 > 2. Save the binary to `~/.claude/bin/claude-lifeline` (Windows: `%USERPROFILE%\.claude\bin\claude-lifeline.exe`), create the directory if it doesn't exist, make it executable (`chmod +x`), and on macOS run `xattr -d com.apple.quarantine ~/.claude/bin/claude-lifeline` to bypass Gatekeeper
 > 3. Edit `~/.claude/settings.json` — add or merge the following key into the existing JSON:
 >    ```json
->    "statusLine": { "type": "command", "command": "~/.claude/bin/claude-lifeline" }
+>    "statusLine": { "type": "command", "command": "~/.claude/bin/claude-lifeline", "refreshInterval": 15 }
 >    ```
->    Do NOT overwrite the entire file — preserve all existing settings.
+>    Do NOT overwrite the entire file — preserve all existing settings. `refreshInterval: 15` keeps the cache TTL countdown and quota ETA close to live (Claude Code's default is event-driven and freezes during idle). If the user already has a custom `refreshInterval`, leave it untouched.
 > 4. Tell the user to restart Claude Code to activate the new status line.
 
 ### Manual install

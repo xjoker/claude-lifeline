@@ -62,9 +62,9 @@ claude-lifeline 增加了**配速智能**：一套可视化系统，将你的实
 > 2. Save the binary to `~/.claude/bin/claude-lifeline` (Windows: `%USERPROFILE%\.claude\bin\claude-lifeline.exe`), create the directory if it doesn't exist, make it executable (`chmod +x`), and on macOS run `xattr -d com.apple.quarantine ~/.claude/bin/claude-lifeline` to bypass Gatekeeper
 > 3. Edit `~/.claude/settings.json` — add or merge the following key into the existing JSON:
 >    ```json
->    "statusLine": { "type": "command", "command": "~/.claude/bin/claude-lifeline" }
+>    "statusLine": { "type": "command", "command": "~/.claude/bin/claude-lifeline", "refreshInterval": 15 }
 >    ```
->    Do NOT overwrite the entire file — preserve all existing settings.
+>    Do NOT overwrite the entire file — preserve all existing settings. `refreshInterval: 15` keeps the cache TTL countdown and quota ETA close to live (Claude Code's default is event-driven and freezes during idle). If the user already has a custom `refreshInterval`, leave it untouched.
 > 4. Tell the user to restart Claude Code to activate the new status line.
 
 ### 手动安装
@@ -115,10 +115,13 @@ cp target/release/claude-lifeline ~/.claude/bin/
 {
   "statusLine": {
     "type": "command",
-    "command": "~/.claude/bin/claude-lifeline"
+    "command": "~/.claude/bin/claude-lifeline",
+    "refreshInterval": 15
   }
 }
 ```
+
+`refreshInterval: 15` 让 cache TTL 倒计时和 quota ETA 接近实时刷新（CC 默认事件驱动，idle 时数字会冻结）。已自定义此字段的用户保留原值。
 
 ### 升级
 
@@ -434,7 +437,6 @@ layout = "auto"    # 布局: auto | single | multi | mini
 [thresholds]
 ctx_yellow_at       = 60.0   # ctx >= 该值 → 黄
 ctx_red_at          = 70.0   # ctx >= 该值 → 红
-ctx_token_detail_at = 85.0   # ctx >= 该值：standard 模式附加 (in:Xk c:Yk)
 
 # 5h / 7d quota 独立配置。7d 默认比 5h 更宽松（80 vs 75），
 # 因为 7d 窗口更长，中段消耗不紧迫
@@ -448,7 +450,7 @@ seven_day_red_at    = 90.0
 pace_tolerance      = 0.0
 ```
 
-mini 与 standard 布局共用同一组 `[thresholds]`。mini 模式忽略 `ctx_token_detail_at`（因为它本身就不显示 token 明细）。
+mini 与 standard 布局共用同一组 `[thresholds]`。
 
 参见 [config.example.toml](../config.example.toml) 获取参考。
 

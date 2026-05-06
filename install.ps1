@@ -13,6 +13,41 @@ $Settings = "$env:USERPROFILE\.claude\settings.json"
 $Config = "$env:USERPROFILE\.claude\claude-lifeline\config.toml"
 $Target = "x86_64-pc-windows-msvc"
 $Action = if ($env:ACTION) { $env:ACTION } else { "install" }
+# refreshInterval=15 让 cache TTL 倒计时和 quota ETA 接近实时（CC 默认事件驱动，
+# idle 时不刷新）。15s 在视觉流畅度和 CPU 开销之间取平衡
+$DefaultRefreshInterval = 15
+$StatusLineCmd = "~/.claude/bin/claude-lifeline"
+
+function Set-StatusLineConfig {
+    # 在 settings.json 中写入 statusLine。保留用户已有的 refreshInterval（如果手动调过）
+    $needCreate = -not (Test-Path $Settings)
+    if ($needCreate) {
+        New-Item -ItemType Directory -Force -Path (Split-Path $Settings) | Out-Null
+        @{statusLine = @{type = "command"; command = $StatusLineCmd; refreshInterval = $DefaultRefreshInterval}} `
+            | ConvertTo-Json -Depth 10 | Set-Content $Settings -Encoding UTF8
+        Write-Host "Created $Settings"
+        return
+    }
+
+    $json = Get-Content $Settings -Raw | ConvertFrom-Json
+    $currentCmd = if ($json.statusLine -and $json.statusLine.command) { $json.statusLine.command } else { "" }
+    $hasInterval = $json.statusLine -and $json.statusLine.PSObject.Properties.Name -contains "refreshInterval" `
+                   -and $json.statusLine.refreshInterval -gt 0
+    if ($currentCmd -eq $StatusLineCmd -and $hasInterval) {
+        Write-Host "settings.json already configured"
+        return
+    }
+
+    Copy-Item $Settings "$Settings.bak"
+    $existingInterval = if ($hasInterval) { $json.statusLine.refreshInterval } else { $DefaultRefreshInterval }
+    $json | Add-Member -Force -MemberType NoteProperty -Name "statusLine" -Value @{
+        type = "command"
+        command = $StatusLineCmd
+        refreshInterval = $existingInterval
+    }
+    $json | ConvertTo-Json -Depth 10 | Set-Content $Settings -Encoding UTF8
+    Write-Host "Updated settings.json (backup: settings.json.bak)"
+}
 
 # ── Layout config helpers ──
 function Set-Layout {
@@ -94,29 +129,7 @@ function Invoke-DoInstall {
         Write-Host "Installed to $InstallDir\$BinName"
     }
 
-    # 配 settings.json
-    if (Test-Path $Settings) {
-        $json = Get-Content $Settings -Raw | ConvertFrom-Json
-        $current = ""
-        if ($json.statusLine -and $json.statusLine.command) {
-            $current = $json.statusLine.command
-        }
-        if ($current -eq "~/.claude/bin/claude-lifeline") {
-            Write-Host "settings.json already configured"
-        } else {
-            Copy-Item $Settings "$Settings.bak"
-            $json | Add-Member -Force -MemberType NoteProperty -Name "statusLine" -Value @{
-                type = "command"
-                command = "~/.claude/bin/claude-lifeline"
-            }
-            $json | ConvertTo-Json -Depth 10 | Set-Content $Settings -Encoding UTF8
-            Write-Host "Updated settings.json (backup: settings.json.bak)"
-        }
-    } else {
-        New-Item -ItemType Directory -Force -Path (Split-Path $Settings) | Out-Null
-        @{statusLine = @{type = "command"; command = "~/.claude/bin/claude-lifeline"}} | ConvertTo-Json -Depth 10 | Set-Content $Settings -Encoding UTF8
-        Write-Host "Created $Settings"
-    }
+    Set-StatusLineConfig
 }
 
 if ($Action -eq "mini") {
@@ -185,28 +198,7 @@ if ($Action -eq "dev") {
     $Version = & "$InstallDir\$BinName" --version 2>$null
     Write-Host "Installed dev build to $InstallDir\$BinName ($Version)"
 
-    if (Test-Path $Settings) {
-        $json = Get-Content $Settings -Raw | ConvertFrom-Json
-        $current = ""
-        if ($json.statusLine -and $json.statusLine.command) {
-            $current = $json.statusLine.command
-        }
-        if ($current -eq "~/.claude/bin/claude-lifeline") {
-            Write-Host "settings.json already configured"
-        } else {
-            Copy-Item $Settings "$Settings.bak"
-            $json | Add-Member -Force -MemberType NoteProperty -Name "statusLine" -Value @{
-                type = "command"
-                command = "~/.claude/bin/claude-lifeline"
-            }
-            $json | ConvertTo-Json -Depth 10 | Set-Content $Settings -Encoding UTF8
-            Write-Host "Updated settings.json (backup: settings.json.bak)"
-        }
-    } else {
-        New-Item -ItemType Directory -Force -Path (Split-Path $Settings) | Out-Null
-        @{statusLine = @{type = "command"; command = "~/.claude/bin/claude-lifeline"}} | ConvertTo-Json -Depth 10 | Set-Content $Settings -Encoding UTF8
-        Write-Host "Created $Settings"
-    }
+    Set-StatusLineConfig
 
     Write-Host ""
     Write-Host "Done! Restart Claude Code to see the dev build."

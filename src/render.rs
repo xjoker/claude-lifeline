@@ -109,23 +109,20 @@ pub fn render(ctx: &RenderContext) {
         let ctx_pct = crate::input::get_context_percent(&ctx.stdin);
         let ctx_color = get_context_color(ctx_pct, t);
         let ctx_bar = render_bar_with_pace(ctx_pct, None, 10, ctx_color);
-        let token_detail = if ctx_pct >= t.ctx_token_detail_at {
-            ctx.stdin.context_window.as_ref()
-                .and_then(|cw| cw.current_usage.as_ref())
-                .map(|u| {
-                    let input = u.input_tokens.unwrap_or(0);
-                    let cache = u.cache_creation_input_tokens.unwrap_or(0)
-                        + u.cache_read_input_tokens.unwrap_or(0);
-                    format!(" {DIM}(in:{} c:{}){RESET}", format_tokens(input), format_tokens(cache))
-                })
-                .unwrap_or_default()
-        } else {
-            String::new()
-        };
         segments.push(format!(
-            "{DIM}ctx{RESET} {ctx_bar} {ctx_color}{:.0}%{RESET}{token_detail}",
+            "{DIM}ctx{RESET} {ctx_bar} {ctx_color}{:.0}%{RESET}",
             ctx_pct
         ));
+    }
+
+    // Segment 1.5: Cache（命中率 + TTL 倒计时）—— 独立段，颜色随状态切换
+    //   expired / 命中率过低 → 颜色警告，便于扫到异常
+    if ctx.config.display.cache_hit {
+        if let Some(s) = crate::cache_ttl::check_and_update(&ctx.stdin) {
+            if let Some((color, text)) = build_cache_text(&s, /*mini=*/false) {
+                segments.push(format!("{DIM}cache{RESET} {color}{text}{RESET}"));
+            }
+        }
     }
 
     // Segment 2: 5h quota（可配置）
@@ -371,18 +368,7 @@ fn format_pace_label(pace: &Option<crate::usage::PaceInfo>) -> String {
         .unwrap_or_default()
 }
 
-/// 格式化 token 数量（K/M 缩写）
-fn format_tokens(count: u64) -> String {
-    if count >= 1_000_000 {
-        format!("{:.1}M", count as f64 / 1_000_000.0)
-    } else if count >= 1_000 {
-        format!("{:.0}k", count as f64 / 1_000.0)
-    } else {
-        format!("{count}")
-    }
-}
-
-/// 格式化代码行数（比 format_tokens 粒度更细：1.3k 而非 1k）
+/// 格式化代码行数（细粒度：1.3k 而非 1k）
 fn format_lines(count: u64) -> String {
     if count >= 10_000 {
         format!("{:.0}k", count as f64 / 1_000.0)
@@ -588,6 +574,30 @@ fn ctx_block_colors(pct: f64, t: &Thresholds) -> (u8, u8) {
     }
 }
 
+/// 命中率低于此值视为"基本未命中"——cache 段染警告色
+/// 30% 经验阈值：连续两轮高新增上下文场景下命中通常仍在 50%+，跌到 30 以下基本是 cache 重建
+const CACHE_LOW_HIT_PCT: f64 = 30.0;
+
+/// 标准布局下的 cache 段文本 + 前景色
+///   expired 窗口内 → ("RED", "expired")
+///   alive + 低命中  → ("YELLOW", "{hit}% {remaining}")
+///   alive + 正常    → ("CYAN",   "{hit}% {remaining}")
+///   alive=false 且不在 expired 窗口 → None（无可显示信息）
+fn build_cache_text(state: &crate::cache_ttl::CacheLiveState, mini: bool) -> Option<(&'static str, String)> {
+    let _ = mini; // 标准 / mini 共用此 fg 决策；mini 用 bg 由 cache_mini_block 单独处理
+    if crate::cache_ttl::within_expired_window(state) {
+        return Some((RED, "expired".to_string()));
+    }
+    if !state.alive {
+        return None;
+    }
+    let hit = state.hit_percent.unwrap_or(0.0);
+    let remaining = crate::cache_ttl::format_remaining(state.remaining_secs);
+    let text = format!("{hit:.0}% {remaining}");
+    let color = if hit < CACHE_LOW_HIT_PCT { YELLOW } else { CYAN };
+    Some((color, text))
+}
+
 /// quota 色块底色（阈值来自配置；5h / 7d 独立）
 fn quota_block_colors(pct: f64, over: bool, yellow_at: f64, red_at: f64) -> (u8, u8) {
     if pct >= red_at {
@@ -597,6 +607,25 @@ fn quota_block_colors(pct: f64, over: bool, yellow_at: f64, red_at: f64) -> (u8,
     } else {
         (BG_QUOTA_SAFE, FG_DARK)
     }
+}
+
+/// cache mini 块：5h/7d 同款 — 无文字 label，靠颜色和位置（紧跟 ctx 之后）区分
+///   expired 窗口    → 红底 "expired"
+///   alive + 低命中  → 黄底 "{hit}% {remaining}"
+///   alive + 正常    → 蓝底 "{hit}% {remaining}"
+///   其他            → None（不渲染）
+fn cache_mini_block(state: &crate::cache_ttl::CacheLiveState) -> Option<(u8, String)> {
+    if crate::cache_ttl::within_expired_window(state) {
+        return Some((BG_DANGER, "expired".to_string()));
+    }
+    if !state.alive {
+        return None;
+    }
+    let hit = state.hit_percent.unwrap_or(0.0);
+    let remaining = crate::cache_ttl::format_remaining(state.remaining_secs);
+    let text = format!("{hit:.0}% {remaining}");
+    let bg = if hit < CACHE_LOW_HIT_PCT { BG_WARN } else { BG_QUOTA_SAFE };
+    Some((bg, text))
 }
 
 /// quota 色块（5h / 7d）：极简格式
@@ -735,6 +764,16 @@ fn render_mini(ctx: &RenderContext) {
         let ctx_pct = crate::input::get_context_percent(&ctx.stdin);
         let (bg, fg) = ctx_block_colors(ctx_pct, t);
         metrics.push(block(bg, fg, &format!("ctx {ctx_pct:.0}%")));
+    }
+
+    // cache（独立块）：5h/7d 风格——无 label，靠颜色区分异常
+    //   expired → 红底；命中率过低 → 黄底；正常 → 蓝底
+    if ctx.config.display.cache_hit {
+        if let Some(s) = crate::cache_ttl::check_and_update(&ctx.stdin) {
+            if let Some((bg, text)) = cache_mini_block(&s) {
+                metrics.push(block(bg, FG_DARK, &text));
+            }
+        }
     }
 
     // 5h

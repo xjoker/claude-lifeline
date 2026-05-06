@@ -18,9 +18,6 @@ pub struct Thresholds {
     /// ctx >= 该值：黄 → 红
     #[serde(default = "d_ctx_red")]
     pub ctx_red_at: f64,
-    /// ctx >= 该值：standard 模式显示 token 明细 (in:Xk c:Yk)
-    #[serde(default = "d_ctx_token_detail")]
-    pub ctx_token_detail_at: f64,
     /// 5h quota >= 该值（或超速）：蓝 → 黄
     #[serde(default = "d_5h_yellow")]
     pub five_hour_yellow_at: f64,
@@ -40,7 +37,6 @@ pub struct Thresholds {
 
 fn d_ctx_yellow() -> f64 { 60.0 }
 fn d_ctx_red() -> f64 { 70.0 }
-fn d_ctx_token_detail() -> f64 { 85.0 }
 fn d_5h_yellow() -> f64 { 75.0 }
 fn d_5h_red() -> f64 { 90.0 }
 fn d_7d_yellow() -> f64 { 80.0 }
@@ -52,7 +48,6 @@ impl Default for Thresholds {
         Self {
             ctx_yellow_at: d_ctx_yellow(),
             ctx_red_at: d_ctx_red(),
-            ctx_token_detail_at: d_ctx_token_detail(),
             five_hour_yellow_at: d_5h_yellow(),
             five_hour_red_at: d_5h_red(),
             seven_day_yellow_at: d_7d_yellow(),
@@ -79,9 +74,6 @@ impl Thresholds {
                 *red = dr;
             }
         }
-        if !(0.0..=100.0).contains(&self.ctx_token_detail_at) {
-            self.ctx_token_detail_at = def.ctx_token_detail_at;
-        }
         if !(0.0..=100.0).contains(&self.pace_tolerance) {
             self.pace_tolerance = def.pace_tolerance;
         }
@@ -107,6 +99,10 @@ pub struct DisplayConfig {
     /// 显示代码改动量 +X -Y（仅当本 session 有增删时）
     #[serde(default = "yes")]
     pub edit_stats: bool,
+    /// 显示独立 cache 段（命中率 + TTL 倒计时）
+    /// 颜色规则：expired 窗口 → 红；命中率 <30% → 黄；正常 → 青
+    #[serde(default = "yes")]
+    pub cache_hit: bool,
     /// 布局：auto 按终端宽度自动拆分，single 强制单行，multi 强制每段独占一行，mini 极简色块单行
     #[serde(default = "Layout::default")]
     pub layout: Layout,
@@ -143,6 +139,7 @@ impl Default for DisplayConfig {
             five_hour: true,
             seven_day: true,
             edit_stats: true,
+            cache_hit: true,
             layout: Layout::Auto,
         }
     }

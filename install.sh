@@ -7,7 +7,10 @@ BIN_NAME="claude-lifeline"
 SETTINGS="$HOME/.claude/settings.json"
 CONFIG="$HOME/.claude/claude-lifeline/config.toml"
 STATUS_LINE_CMD="~/.claude/bin/claude-lifeline"
-STATUS_LINE_JSON='{"type":"command","command":"~/.claude/bin/claude-lifeline"}'
+# refreshInterval=15 让 cache TTL 倒计时和 quota ETA 接近实时（CC 默认事件驱动，
+# idle 时不刷新）。15s 在视觉流畅度和 CPU 开销之间取平衡（statusline 单跑约 30ms）
+DEFAULT_REFRESH_INTERVAL=15
+STATUS_LINE_JSON='{"type":"command","command":"~/.claude/bin/claude-lifeline","refreshInterval":15}'
 
 # ── Layout config helpers (~/.claude/claude-lifeline/config.toml) ──
 
@@ -65,15 +68,22 @@ has_jq() { command -v jq &>/dev/null; }
 settings_add() {
   cp "$SETTINGS" "$SETTINGS.bak"
   if has_jq; then
-    jq --argjson sl "$STATUS_LINE_JSON" '.statusLine = $sl' "$SETTINGS.bak" > "$SETTINGS"
+    # 保留用户已有的 refreshInterval（如果他们手动调过），否则用默认 15s
+    jq --arg cmd "$STATUS_LINE_CMD" --argjson def "$DEFAULT_REFRESH_INTERVAL" '
+      .statusLine = ((.statusLine // {}) + {
+        type: "command",
+        command: $cmd,
+        refreshInterval: (.statusLine.refreshInterval // $def)
+      })
+    ' "$SETTINGS.bak" > "$SETTINGS"
   else
     # sed fallback: 区分空对象 {} 与已有键的情况
     #   空对象：`{,"statusLine":...}` 会是无效 JSON，需要不带逗号的形式
     #   有键：在最后 } 前插入 `,"statusLine":...`
     if grep -q '"' "$SETTINGS"; then
-      sed -i.tmp 's/}[[:space:]]*$/,"statusLine":{"type":"command","command":"~\/.claude\/bin\/claude-lifeline"}}/' "$SETTINGS"
+      sed -i.tmp "s|}[[:space:]]*\$|,\"statusLine\":{\"type\":\"command\",\"command\":\"$STATUS_LINE_CMD\",\"refreshInterval\":$DEFAULT_REFRESH_INTERVAL}}|" "$SETTINGS"
     else
-      printf '{"statusLine":{"type":"command","command":"%s"}}\n' "$STATUS_LINE_CMD" > "$SETTINGS"
+      printf '{"statusLine":{"type":"command","command":"%s","refreshInterval":%d}}\n' "$STATUS_LINE_CMD" "$DEFAULT_REFRESH_INTERVAL" > "$SETTINGS"
     fi
     rm -f "$SETTINGS.tmp"
   fi
@@ -95,7 +105,16 @@ settings_remove() {
 }
 
 settings_has() {
-  grep -q "\"command\".*\"$STATUS_LINE_CMD\"" "$SETTINGS" 2>/dev/null
+  # 仅当 command 匹配 AND refreshInterval 已存在时才认为"已配置"。
+  # 缺 refreshInterval 的旧安装会 fall through 到 settings_add，自动补上
+  if has_jq; then
+    jq -e --arg cmd "$STATUS_LINE_CMD" \
+      '.statusLine.command == $cmd and (.statusLine.refreshInterval // 0) > 0' \
+      "$SETTINGS" >/dev/null 2>&1
+  else
+    grep -q "\"command\".*\"$STATUS_LINE_CMD\"" "$SETTINGS" 2>/dev/null \
+      && grep -q '"refreshInterval"' "$SETTINGS" 2>/dev/null
+  fi
 }
 
 # ── Install 流程：下载最新二进制 + 配 settings.json（幂等，等同 upgrade） ──
@@ -150,7 +169,8 @@ do_install() {
     fi
   else
     mkdir -p "$(dirname "$SETTINGS")"
-    printf '{\n  "statusLine": {"type": "command", "command": "%s"}\n}\n' "$STATUS_LINE_CMD" > "$SETTINGS"
+    printf '{\n  "statusLine": {"type": "command", "command": "%s", "refreshInterval": %d}\n}\n' \
+      "$STATUS_LINE_CMD" "$DEFAULT_REFRESH_INTERVAL" > "$SETTINGS"
     echo "Created $SETTINGS"
   fi
 }
@@ -234,7 +254,8 @@ case "$ACTION" in
       fi
     else
       mkdir -p "$(dirname "$SETTINGS")"
-      printf '{\n  "statusLine": {"type": "command", "command": "%s"}\n}\n' "$STATUS_LINE_CMD" > "$SETTINGS"
+      printf '{\n  "statusLine": {"type": "command", "command": "%s", "refreshInterval": %d}\n}\n' \
+        "$STATUS_LINE_CMD" "$DEFAULT_REFRESH_INTERVAL" > "$SETTINGS"
       echo "Created $SETTINGS"
     fi
 
