@@ -1,7 +1,7 @@
 use serde::Deserialize;
 
 /// 用户配置（~/.claude/claude-lifeline/config.toml）
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 pub struct Config {
     #[serde(default = "DisplayConfig::default")]
     pub display: DisplayConfig,
@@ -103,34 +103,9 @@ pub struct DisplayConfig {
     /// 颜色规则：expired 窗口 → 红；命中率 <30% → 黄；正常 → 青
     #[serde(default = "yes")]
     pub cache_hit: bool,
-    /// 布局：auto 按终端宽度自动拆分，single 强制单行，multi 强制每段独占一行，mini 极简色块单行
-    #[serde(default = "Layout::default")]
-    pub layout: Layout,
-}
-
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum Layout {
-    Auto,
-    Single,
-    Multi,
-    Mini,
-}
-
-impl Layout {
-    fn default() -> Self { Self::Auto }
 }
 
 fn yes() -> bool { true }
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            display: DisplayConfig::default(),
-            thresholds: Thresholds::default(),
-        }
-    }
-}
 
 impl Default for DisplayConfig {
     fn default() -> Self {
@@ -140,7 +115,6 @@ impl Default for DisplayConfig {
             seven_day: true,
             edit_stats: true,
             cache_hit: true,
-            layout: Layout::Auto,
         }
     }
 }

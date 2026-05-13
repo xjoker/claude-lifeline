@@ -147,8 +147,16 @@ pub fn check_and_update(stdin: &StdinData) -> Option<CacheLiveState> {
         .map(|p| p.last_cache_read == cache_read)
         .unwrap_or(false);
     let last_active_at = if same_call {
-        // 同一次 API 调用的重复观察——保留时间戳，但若有 last_expired_at 也清掉（不应同时有效）
-        prev.as_ref().map(|p| p.last_active_at).unwrap_or(now)
+        // 同一次 API 调用的重复观察——保留时间戳；同时清除 last_expired_at 残留
+        // （cache 活着时 expired 标记不应有效；漏写会让下次 cache_read 归零时错误触发 within_expired_window）
+        let ts = prev.as_ref().map(|p| p.last_active_at).unwrap_or(now);
+        write_state(&session_id, &CacheTtlFile {
+            session_id: session_id.clone(),
+            last_cache_read: cache_read,
+            last_active_at: ts,
+            last_expired_at: None,
+        });
+        ts
     } else {
         // 新 API 调用，刷新时间戳，清除"刚过期"标记
         let elapsed = prev.as_ref().map(|p| now - p.last_active_at);
@@ -313,7 +321,7 @@ fn decisions_path() -> PathBuf {
         .join("cache-decisions.jsonl")
 }
 
-fn maybe_compact_decisions(path: &PathBuf) {
+fn maybe_compact_decisions(path: &std::path::Path) {
     let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
     if size < DECISIONS_MAX_BYTES {
         return;

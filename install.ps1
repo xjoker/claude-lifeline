@@ -10,7 +10,6 @@ $Repo = "xjoker/claude-lifeline"
 $InstallDir = "$env:USERPROFILE\.claude\bin"
 $BinName = "claude-lifeline.exe"
 $Settings = "$env:USERPROFILE\.claude\settings.json"
-$Config = "$env:USERPROFILE\.claude\claude-lifeline\config.toml"
 $Target = "x86_64-pc-windows-msvc"
 $Action = if ($env:ACTION) { $env:ACTION } else { "install" }
 # refreshInterval=15 让 cache TTL 倒计时和 quota ETA 接近实时（CC 默认事件驱动，
@@ -49,54 +48,6 @@ function Set-StatusLineConfig {
     Write-Host "Updated settings.json (backup: settings.json.bak)"
 }
 
-# ── Layout config helpers ──
-function Set-Layout {
-    param([string]$Layout)
-    $configDir = Split-Path $Config
-    if (-not (Test-Path $configDir)) {
-        New-Item -ItemType Directory -Force -Path $configDir | Out-Null
-    }
-    if (-not (Test-Path $Config)) {
-        Set-Content -Path $Config -Value "[display]`nlayout = `"$Layout`"" -Encoding UTF8
-        Write-Host "Created $Config with layout = `"$Layout`""
-        return
-    }
-    Copy-Item $Config "$Config.bak"
-    # 段内替换/插入：只在 [display] 段内改 layout，避免误伤其他段同名字段
-    $lines = Get-Content $Config
-    $out = New-Object System.Collections.Generic.List[string]
-    $inDisplay = $false
-    $replaced = $false
-    foreach ($line in $lines) {
-        if ($line -match '^\[[^\]]+\]\s*$') {
-            if ($inDisplay -and -not $replaced) {
-                $out.Add("layout = `"$Layout`"")
-                $replaced = $true
-            }
-            $inDisplay = ($line -match '^\[display\]\s*$')
-            $out.Add($line)
-            continue
-        }
-        if ($inDisplay -and $line -match '^\s*layout\s*=') {
-            $out.Add("layout = `"$Layout`"")
-            $replaced = $true
-            continue
-        }
-        $out.Add($line)
-    }
-    if ($inDisplay -and -not $replaced) {
-        $out.Add("layout = `"$Layout`"")
-        $replaced = $true
-    }
-    if (-not $replaced) {
-        $out.Add("")
-        $out.Add("[display]")
-        $out.Add("layout = `"$Layout`"")
-    }
-    Set-Content -Path $Config -Value $out -Encoding UTF8
-    Write-Host "Set layout = `"$Layout`" in $Config (backup: config.toml.bak)"
-}
-
 # ── Install 流程：下载最新二进制 + 配 settings.json（幂等，等同 upgrade） ──
 
 function Invoke-DoInstall {
@@ -132,18 +83,10 @@ function Invoke-DoInstall {
     Set-StatusLineConfig
 }
 
-if ($Action -eq "mini") {
+if ($Action -eq "mini" -or $Action -eq "standard") {
+    Write-Host "Note: the 'mini'/'standard' subcommands are removed in this version."
+    Write-Host "      claude-lifeline now ships with the mini layout only — running plain install."
     Invoke-DoInstall
-    Set-Layout "mini"
-    Write-Host ""
-    Write-Host "Done! Restart Claude Code to apply mini layout."
-    exit 0
-}
-if ($Action -eq "standard") {
-    Invoke-DoInstall
-    Set-Layout "auto"
-    Write-Host ""
-    Write-Host "Done! Restart Claude Code to apply standard layout."
     exit 0
 }
 

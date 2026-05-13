@@ -1,19 +1,7 @@
-use crate::config::{Config, Layout, Thresholds};
+use crate::config::{Config, Thresholds};
 use crate::git::GitInfo;
 use crate::input::StdinData;
 use crate::usage::UsageData;
-
-// ── ANSI 颜色常量 ──
-
-pub const RESET: &str = "\x1b[0m";
-pub const DIM: &str = "\x1b[2m";
-pub const BOLD_WHITE: &str = "\x1b[1;37m";
-pub const GREEN: &str = "\x1b[32m";
-pub const YELLOW: &str = "\x1b[33m";
-pub const MAGENTA: &str = "\x1b[35m";
-pub const CYAN: &str = "\x1b[36m";
-pub const RED: &str = "\x1b[31m";
-pub const BRIGHT_BLUE: &str = "\x1b[94m";
 
 // ── 渲染上下文 ──
 
@@ -21,188 +9,21 @@ pub struct RenderContext {
     pub stdin: StdinData,
     pub git: GitInfo,
     pub usage: UsageData,
-    pub session_duration: Option<std::time::Duration>,
     pub config: Config,
     pub update_hint: Option<String>,
 }
 
 // ── 公共函数 ──
 
-/// 渲染两行状态栏，输出到 stdout
-///
-/// 行1: [Sonnet 4.6 | Max]  claude-lifeline  git:(main*)
-/// 行2: ctx ████████░░ 45%  │  5h ████|██░░ 65%(1h 45m ↑)  │  7d ██|░░░░░░ 22%(4d 3h ↓)
 pub fn render(ctx: &RenderContext) {
-    if ctx.config.display.layout == Layout::Mini {
-        render_mini(ctx);
-        return;
-    }
-
-    // ── 行1 ──
-    let model_name = crate::input::get_model_name(&ctx.stdin);
-
-    // [Model] — 青色
-    let model_section = format!("{CYAN}[{model_name}]{RESET}");
-
-    // cwd 层级 — 黄色，HOME 替换为 ~，剥离控制字符防注入
-    let cwd_str = ctx
-        .stdin
-        .cwd
-        .as_deref()
-        .or_else(|| {
-            ctx.stdin
-                .workspace
-                .as_ref()
-                .and_then(|w| w.current_dir.as_deref())
-        })
-        .unwrap_or("unknown");
-    let cwd_clean = crate::input::sanitize_external(cwd_str);
-    let project_display = format!("{YELLOW}{}{RESET}", abbrev_home(&cwd_clean));
-
-    // git 部分 — git:() 品红，分支名青色，ahead/behind（分支名剥控制字符）
-    let git_section = if let Some(branch) = &ctx.git.branch {
-        let branch_clean = crate::input::sanitize_external(branch);
-        let dirty = if ctx.git.is_dirty { "*" } else { "" };
-        let mut ab = String::new();
-        if ctx.git.ahead > 0 {
-            ab.push_str(&format!(" {GREEN}↑{}{RESET}", ctx.git.ahead));
-        }
-        if ctx.git.behind > 0 {
-            ab.push_str(&format!(" {RED}↓{}{RESET}", ctx.git.behind));
-        }
-        format!(" {MAGENTA}git:({RESET}{CYAN}{branch_clean}{dirty}{RESET}{MAGENTA}){RESET}{ab}")
-    } else {
-        String::new()
-    };
-
-    // 会话时长 — dim 显示
-    let session_section = ctx.session_duration.map(|d| {
-        let total_secs = d.as_secs();
-        let formatted = if total_secs < 60 {
-            "0m".to_string()
-        } else if total_secs < 3600 {
-            format!("{}m", total_secs / 60)
-        } else {
-            format!("{}h {}m", total_secs / 3600, (total_secs % 3600) / 60)
-        };
-        format!(" {DIM}{formatted}{RESET}")
-    }).unwrap_or_default();
-
-    // 代码改动量 — `+X` 绿、`-Y` 红（仅当启用 + 有增删）
-    let stats_section = if ctx.config.display.edit_stats {
-        edit_stats_parts(&ctx.stdin)
-            .map(|(a, r)| format!(" {GREEN}{a}{RESET} {RED}{r}{RESET}"))
-            .unwrap_or_default()
-    } else {
-        String::new()
-    };
-
-    let line1 = format!("{model_section} {project_display}{git_section}{stats_section}{session_section}");
-
-    // ── 行2 ──
-    let mut segments: Vec<String> = Vec::new();
-
-    // Segment 1: Context（可配置，>= 85% 时显示 token 明细）
-    let t = &ctx.config.thresholds;
-
-    if ctx.config.display.context {
-        let ctx_pct = crate::input::get_context_percent(&ctx.stdin);
-        let ctx_color = get_context_color(ctx_pct, t);
-        let ctx_bar = render_bar_with_pace(ctx_pct, None, 10, ctx_color);
-        segments.push(format!(
-            "{DIM}ctx{RESET} {ctx_bar} {ctx_color}{:.0}%{RESET}",
-            ctx_pct
-        ));
-    }
-
-    // Segment 1.5: Cache（命中率 + TTL 倒计时）—— 独立段，颜色随状态切换
-    //   expired / 命中率过低 → 颜色警告，便于扫到异常
-    if ctx.config.display.cache_hit {
-        if let Some(s) = crate::cache_ttl::check_and_update(&ctx.stdin) {
-            if let Some((color, text)) = build_cache_text(&s, /*mini=*/false) {
-                segments.push(format!("{DIM}cache{RESET} {color}{text}{RESET}"));
-            }
-        }
-    }
-
-    // Segment 2: 5h quota（可配置）
-    if ctx.config.display.five_hour {
-        if let Some(five_hour) = &ctx.usage.five_hour {
-            let pace = crate::usage::calc_pace(five_hour, crate::usage::WINDOW_5H_SECS, t.pace_tolerance);
-            let over = pace.as_ref().is_some_and(|p| p.direction == crate::usage::PaceDirection::Over);
-            let color = get_quota_color_with_pace(five_hour.used_percent, over, t.five_hour_yellow_at, t.five_hour_red_at);
-            let pace_pct = pace.as_ref().map(|p| p.pace_percent);
-            let bar = render_bar_with_pace(five_hour.used_percent, pace_pct, 10, color);
-            let suffix = format_quota_suffix(&five_hour.resets_at, &pace);
-            let alert = if over { "!" } else { "" };
-            let pace_label = format_pace_label(&pace);
-
-            segments.push(format!(
-                "{DIM}5h{RESET} {bar} {color}{:.0}%{alert}{RESET}{pace_label}{suffix}",
-                five_hour.used_percent
-            ));
-        }
-    }
-
-    // Segment 3: 7d quota（可配置）
-    if ctx.config.display.seven_day {
-        if let Some(seven_day) = &ctx.usage.seven_day {
-            let pace = crate::usage::calc_pace(seven_day, crate::usage::WINDOW_7D_SECS, t.pace_tolerance);
-            let over = pace.as_ref().is_some_and(|p| p.direction == crate::usage::PaceDirection::Over);
-            let color = get_quota_color_with_pace(seven_day.used_percent, over, t.seven_day_yellow_at, t.seven_day_red_at);
-            let pace_pct = pace.as_ref().map(|p| p.pace_percent);
-            let bar = render_bar_with_pace(seven_day.used_percent, pace_pct, 10, color);
-            let suffix = format_quota_suffix(&seven_day.resets_at, &pace);
-            let alert = if over { "!" } else { "" };
-            let pace_label = format_pace_label(&pace);
-
-            segments.push(format!(
-                "{DIM}7d{RESET} {bar} {color}{:.0}%{alert}{RESET}{pace_label}{suffix}",
-                seven_day.used_percent
-            ));
-        }
-    }
-
-    let separator = format!("{DIM} │ {RESET}");
-    let single_line = segments.join(&separator);
-
-    // 升级提示：单行附在末尾，多行时独占一行
-    let update_inline = ctx.update_hint.as_ref()
-        .map(|v| format!("{separator}{YELLOW}↑{v}{RESET}"))
-        .unwrap_or_default();
-    let update_standalone = ctx.update_hint.as_ref()
-        .map(|v| format!("{YELLOW}↑{v}{RESET}"))
-        .unwrap_or_default();
-
-    let use_multi = match ctx.config.display.layout {
-        Layout::Multi => true,
-        Layout::Single | Layout::Mini => false,
-        Layout::Auto => {
-            // 优先让终端自己换行处理长行 —— 只有在 line2 会超过 2 物理行时才拆分为每段独占一行
-            let width = detect_terminal_width();
-            let visual_len = visible_width(&format!("{single_line}{update_inline}"));
-            visual_len > width * 2
-        }
-    };
-
-    println!("{line1}");
-    if use_multi {
-        for seg in &segments {
-            println!("{seg}");
-        }
-        if !update_standalone.is_empty() {
-            println!("{update_standalone}");
-        }
-    } else {
-        println!("{single_line}{update_inline}");
-    }
+    render_mini(ctx);
 }
 
-/// 探测终端列宽，优先级：COLUMNS env → stdout/stderr/stdin tty → /dev/tty → 80 兜底
+/// 探测终端列宽，优先级：COLUMNS env → stdin/stdout/stderr tty → /dev/tty → 200 兜底
 ///
-/// Claude Code 把 stdin/stdout 都管道化，`terminal_size()` 通常 3 个 fd 全失败，
-/// 必须额外打开 /dev/tty 去 ioctl。默认 80 比之前的 120 保守，避免在未知宽度
-/// 时过度乐观导致拆行不触发
+/// Claude Code GUI app 的 hook 子进程 stdin/stdout/stderr 全是 pipe，且无 controlling
+/// terminal，三种探测都返回 None。默认 200 倾向于发单行让 CC 按真实宽度自然换行；
+/// 真窄终端的代价是 mid-block 截断（罕见，且优于在宽屏上误拆行）
 fn detect_terminal_width() -> usize {
     if let Ok(cols) = std::env::var("COLUMNS") {
         if let Ok(w) = cols.parse::<usize>() {
@@ -219,7 +40,7 @@ fn detect_terminal_width() -> usize {
     if let Some(w) = probe_tty_width() {
         return w;
     }
-    80
+    200
 }
 
 /// Unix 下打开 /dev/tty 直接 ioctl 查宽度，绕过 CC 的 pipe
@@ -285,89 +106,6 @@ fn char_width(c: char) -> usize {
 
 // ── 私有辅助函数 ──
 
-/// 路径首部 HOME 替换为 `~`，跨平台兼容（HOME / USERPROFILE）
-fn abbrev_home(path: &str) -> String {
-    let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .unwrap_or_default();
-    if !home.is_empty() && path.starts_with(&home) {
-        let rest = &path[home.len()..];
-        if rest.is_empty() || rest.starts_with('/') || rest.starts_with('\\') {
-            return format!("~{rest}");
-        }
-    }
-    path.to_string()
-}
-
-/// 格式化 quota 后缀：(重置时间 ETA 耗尽预估)
-fn format_quota_suffix(
-    resets_at: &Option<chrono::DateTime<chrono::Utc>>,
-    pace: &Option<crate::usage::PaceInfo>,
-) -> String {
-    let reset_str = resets_at
-        .as_ref()
-        .map(crate::usage::format_reset_time)
-        .unwrap_or_default();
-
-    // 耗尽时间预估（ETA 前缀标明是预测值，非实际到期时间）
-    let depletion_str = pace.as_ref()
-        .and_then(|p| p.depletion_eta.as_ref())
-        .map(|eta| {
-            let local: chrono::DateTime<chrono::Local> = eta.with_timezone(&chrono::Local);
-            let today = chrono::Local::now().date_naive();
-            let eta_date = local.date_naive();
-            let fmt = if eta_date == today {
-                local.format("%H:%M").to_string()
-            } else {
-                local.format("%-m/%-d %H:%M").to_string()
-            };
-            format!(" {RED}ETA {fmt}{RESET}")
-        })
-        .unwrap_or_default();
-
-    // 恢复时间：超速时显示停工多久可追平配速
-    let recovery_str = pace.as_ref()
-        .and_then(|p| p.recovery_secs)
-        .map(|secs| {
-            let formatted = if secs < 60 {
-                "1m".to_string()
-            } else if secs < 3600 {
-                format!("{}m", secs / 60)
-            } else {
-                format!("{}h {}m", secs / 3600, (secs % 3600) / 60)
-            };
-            format!(" {YELLOW}wait {formatted}{RESET}")
-        })
-        .unwrap_or_default();
-
-    if reset_str.is_empty() && depletion_str.is_empty() && recovery_str.is_empty() {
-        return String::new();
-    }
-
-    let mut inner = String::new();
-    if !reset_str.is_empty() {
-        inner.push_str(&format!("{DIM}{reset_str}{RESET}"));
-    }
-    if !depletion_str.is_empty() {
-        if !inner.is_empty() {
-            inner.push(' ');
-        }
-        inner.push_str(&depletion_str);
-    }
-    if !recovery_str.is_empty() {
-        inner.push_str(&recovery_str);
-    }
-    format!("{DIM}({RESET}{inner}{DIM}){RESET}")
-}
-
-/// 格式化配速位置标签：仅超速时显示 /p15.23%
-fn format_pace_label(pace: &Option<crate::usage::PaceInfo>) -> String {
-    pace.as_ref()
-        .filter(|p| p.direction == crate::usage::PaceDirection::Over)
-        .map(|p| format!("{DIM}/p{:.2}%{RESET}", p.pace_percent))
-        .unwrap_or_default()
-}
-
 /// 格式化代码行数（细粒度：1.3k 而非 1k）
 fn format_lines(count: u64) -> String {
     if count >= 10_000 {
@@ -396,97 +134,12 @@ fn edit_stats_parts(stdin: &crate::input::StdinData) -> Option<(String, String)>
 
 /// mini stats 块：灰底 + `+X` 绿字 / `-Y` 红字，中间空格保持 bg 连续
 fn stats_block(added: &str, removed: &str) -> String {
-    // 在同一个 bg 内切换 fg：先开 bg + 左 padding，再依次染色两段，最后 reset
     format!(
         "\x1b[48;5;{bg}m\x1b[38;5;{green}m {added}\x1b[38;5;{red}m {removed} \x1b[0m",
         bg = BG_STATS,
         green = BG_CTX_SAFE,
         red = BG_DANGER,
     )
-}
-
-/// 渲染带配速标记的进度条（配速线插入而非替换，不吃掉填充块）
-///
-/// 同色连续字符批量输出，减少 ANSI 转义码开销（约 3x），改善 Windows 宽度截断问题
-fn render_bar_with_pace(used_pct: f64, pace_pct: Option<f64>, width: usize, color: &str) -> String {
-    let used_pos = ((used_pct / 100.0) * width as f64).round() as usize;
-    let used_pos = used_pos.min(width);
-
-    let pace_pos = pace_pct.map(|p| {
-        let pos = ((p / 100.0) * width as f64).round() as usize;
-        pos.min(width)
-    });
-
-    let mut result = String::new();
-    let mut run_color: &str = "";
-    let mut run_chars = String::new();
-
-    // 将当前缓冲批量写入 result
-    macro_rules! flush_run {
-        () => {
-            if !run_chars.is_empty() {
-                result.push_str(run_color);
-                result.push_str(&run_chars);
-                result.push_str(RESET);
-                run_chars.clear();
-            }
-        };
-    }
-
-    for i in 0..width {
-        // 配速线：插入当前位置之前
-        if Some(i) == pace_pos {
-            flush_run!();
-            result.push_str(BOLD_WHITE);
-            result.push('|');
-            result.push_str(RESET);
-        }
-
-        let (ch, ch_color): (char, &str) = if i < used_pos {
-            ('█', color)
-        } else {
-            ('░', DIM)
-        };
-
-        // 颜色变化时先刷新缓冲
-        if ch_color != run_color {
-            flush_run!();
-            run_color = ch_color;
-        }
-        run_chars.push(ch);
-    }
-    flush_run!();
-
-    // 配速线在末尾
-    if pace_pos == Some(width) {
-        result.push_str(BOLD_WHITE);
-        result.push('|');
-        result.push_str(RESET);
-    }
-
-    result
-}
-
-/// Context 颜色阈值（可配置）
-fn get_context_color(percent: f64, t: &Thresholds) -> &'static str {
-    if percent >= t.ctx_red_at {
-        RED
-    } else if percent >= t.ctx_yellow_at {
-        YELLOW
-    } else {
-        GREEN
-    }
-}
-
-/// Quota 颜色阈值（考虑超速状态，yellow/red 阈值来自配置）
-fn get_quota_color_with_pace(percent: f64, over_pace: bool, yellow_at: f64, red_at: f64) -> &'static str {
-    if percent >= red_at {
-        RED
-    } else if over_pace || percent >= yellow_at {
-        YELLOW
-    } else {
-        BRIGHT_BLUE
-    }
 }
 
 // ── Mini 模式：极简色块单行 ──
@@ -574,29 +227,7 @@ fn ctx_block_colors(pct: f64, t: &Thresholds) -> (u8, u8) {
     }
 }
 
-/// 命中率低于此值视为"基本未命中"——cache 段染警告色
-/// 30% 经验阈值：连续两轮高新增上下文场景下命中通常仍在 50%+，跌到 30 以下基本是 cache 重建
 const CACHE_LOW_HIT_PCT: f64 = 30.0;
-
-/// 标准布局下的 cache 段文本 + 前景色
-///   expired 窗口内 → ("RED", "expired")
-///   alive + 低命中  → ("YELLOW", "{hit}% {remaining}")
-///   alive + 正常    → ("CYAN",   "{hit}% {remaining}")
-///   alive=false 且不在 expired 窗口 → None（无可显示信息）
-fn build_cache_text(state: &crate::cache_ttl::CacheLiveState, mini: bool) -> Option<(&'static str, String)> {
-    let _ = mini; // 标准 / mini 共用此 fg 决策；mini 用 bg 由 cache_mini_block 单独处理
-    if crate::cache_ttl::within_expired_window(state) {
-        return Some((RED, "expired".to_string()));
-    }
-    if !state.alive {
-        return None;
-    }
-    let hit = state.hit_percent.unwrap_or(0.0);
-    let remaining = crate::cache_ttl::format_remaining(state.remaining_secs);
-    let text = format!("{hit:.0}% {remaining}");
-    let color = if hit < CACHE_LOW_HIT_PCT { YELLOW } else { CYAN };
-    Some((color, text))
-}
 
 /// quota 色块底色（阈值来自配置；5h / 7d 独立）
 fn quota_block_colors(pct: f64, over: bool, yellow_at: f64, red_at: f64) -> (u8, u8) {
@@ -632,24 +263,24 @@ fn cache_mini_block(state: &crate::cache_ttl::CacheLiveState) -> Option<(u8, Str
 ///   正常: `U/P%`
 ///   超速: `U/P%! →HH:MM ↓45m`   (ETA 用 → 前缀、wait 用 ↓ 前缀；5h/7d label 砍掉)
 /// 两块靠位置/顺序区分：5h 永远在 7d 左边
+///
+/// pace 由调用方传入，避免在外层判断 over 后内部再算一次（也防止 Utc::now() 跨秒导致两次结果不一致）。
 fn quota_block(
     w: &crate::usage::WindowUsage,
-    window_secs: i64,
-    _label: &str,  // 保留参数供未来扩展；mini 极简模式不显示
+    pace: Option<&crate::usage::PaceInfo>,
+    label: &str,
     yellow_at: f64,
     red_at: f64,
-    pace_tolerance: f64,
 ) -> String {
-    let pace = crate::usage::calc_pace(w, window_secs, pace_tolerance);
-    let pace_pct = pace.as_ref().map(|p| p.pace_percent).unwrap_or(0.0);
-    let over = pace.as_ref().is_some_and(|p| p.direction == crate::usage::PaceDirection::Over);
+    let pace_pct = pace.map(|p| p.pace_percent).unwrap_or(0.0);
+    let over = pace.is_some_and(|p| p.direction == crate::usage::PaceDirection::Over);
 
     let (bg, fg) = quota_block_colors(w.used_percent, over, yellow_at, red_at);
     let alert = if over { "!" } else { "" };
+    let prefix = if label.is_empty() { String::new() } else { format!("{label}:") };
 
     let (eta_str, wait_str) = if over {
         let eta = pace
-            .as_ref()
             .and_then(|p| p.depletion_eta.as_ref())
             .map(|eta| {
                 let local: chrono::DateTime<chrono::Local> = eta.with_timezone(&chrono::Local);
@@ -663,7 +294,6 @@ fn quota_block(
             })
             .unwrap_or_default();
         let wait = pace
-            .as_ref()
             .and_then(|p| p.recovery_secs)
             .map(|secs| format!(" ↓{}", format_short_duration(secs)))
             .unwrap_or_default();
@@ -673,7 +303,7 @@ fn quota_block(
     };
 
     let text = format!(
-        "{:.0}/{:.0}%{alert}{eta_str}{wait_str}",
+        "{prefix}{:.0}/{:.0}%{alert}{eta_str}{wait_str}",
         w.used_percent, pace_pct
     );
     block(bg, fg, &text)
@@ -779,13 +409,13 @@ fn render_mini(ctx: &RenderContext) {
     // 5h
     if ctx.config.display.five_hour {
         if let Some(w) = &ctx.usage.five_hour {
+            let pace = crate::usage::calc_pace(w, crate::usage::WINDOW_5H_SECS, t.pace_tolerance);
             metrics.push(quota_block(
                 w,
-                crate::usage::WINDOW_5H_SECS,
-                "5h",
+                pace.as_ref(),
+                "",
                 t.five_hour_yellow_at,
                 t.five_hour_red_at,
-                t.pace_tolerance,
             ));
         }
     }
@@ -793,14 +423,30 @@ fn render_mini(ctx: &RenderContext) {
     // 7d
     if ctx.config.display.seven_day {
         if let Some(w) = &ctx.usage.seven_day {
+            let pace = crate::usage::calc_pace(w, crate::usage::WINDOW_7D_SECS, t.pace_tolerance);
             metrics.push(quota_block(
                 w,
-                crate::usage::WINDOW_7D_SECS,
-                "7d",
+                pace.as_ref(),
+                "",
                 t.seven_day_yellow_at,
                 t.seven_day_red_at,
-                t.pace_tolerance,
             ));
+        }
+    }
+
+    // Sonnet 7d（仅超速时出现）
+    if ctx.config.display.seven_day {
+        if let Some(w) = &ctx.usage.seven_day_sonnet {
+            let pace = crate::usage::calc_pace(w, crate::usage::WINDOW_7D_SECS, t.pace_tolerance);
+            if pace.as_ref().is_some_and(|p| p.direction == crate::usage::PaceDirection::Over) {
+                metrics.push(quota_block(
+                    w,
+                    pace.as_ref(),
+                    "S",
+                    t.seven_day_yellow_at,
+                    t.seven_day_red_at,
+                ));
+            }
         }
     }
 

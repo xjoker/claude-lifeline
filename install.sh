@@ -5,61 +5,11 @@ REPO="xjoker/claude-lifeline"
 INSTALL_DIR="$HOME/.claude/bin"
 BIN_NAME="claude-lifeline"
 SETTINGS="$HOME/.claude/settings.json"
-CONFIG="$HOME/.claude/claude-lifeline/config.toml"
 STATUS_LINE_CMD="~/.claude/bin/claude-lifeline"
 # refreshInterval=15 让 cache TTL 倒计时和 quota ETA 接近实时（CC 默认事件驱动，
 # idle 时不刷新）。15s 在视觉流畅度和 CPU 开销之间取平衡（statusline 单跑约 30ms）
 DEFAULT_REFRESH_INTERVAL=15
 STATUS_LINE_JSON='{"type":"command","command":"~/.claude/bin/claude-lifeline","refreshInterval":15}'
-
-# ── Layout config helpers (~/.claude/claude-lifeline/config.toml) ──
-
-# 设置 [display] layout 为指定值（mini | auto | single | multi），保留其他配置
-set_layout() {
-  local layout="$1"
-  mkdir -p "$(dirname "$CONFIG")"
-  if [ ! -f "$CONFIG" ]; then
-    printf '[display]\nlayout = "%s"\n' "$layout" > "$CONFIG"
-    echo "Created $CONFIG with layout = \"$layout\""
-    return
-  fi
-  cp "$CONFIG" "$CONFIG.bak"
-  # 用 awk 做段内替换/插入，避免误改 [display] 之外 segment 里同名字段
-  awk -v layout="$layout" '
-    BEGIN { in_display = 0; replaced = 0 }
-    # 段标题
-    /^\[[^]]+\][[:space:]]*$/ {
-      # 离开 [display] 前，如还没替换成功，就在段末尾补一行
-      if (in_display && !replaced) {
-        print "layout = \"" layout "\""
-        replaced = 1
-      }
-      in_display = ($0 ~ /^\[display\][[:space:]]*$/)
-      print
-      next
-    }
-    # [display] 段内的 layout 行 → 替换
-    in_display && /^[[:space:]]*layout[[:space:]]*=/ {
-      print "layout = \"" layout "\""
-      replaced = 1
-      next
-    }
-    { print }
-    END {
-      if (in_display && !replaced) {
-        print "layout = \"" layout "\""
-        replaced = 1
-      }
-      # 文件完全没有 [display] 段 → 追加新段
-      if (!replaced) {
-        print ""
-        print "[display]"
-        print "layout = \"" layout "\""
-      }
-    }
-  ' "$CONFIG.bak" > "$CONFIG"
-  echo "Set layout = \"$layout\" in $CONFIG (backup: config.toml.bak)"
-}
 
 # ── JSON helpers (jq preferred, sed fallback) ──
 
@@ -200,18 +150,10 @@ case "$ACTION" in
     echo "Done! Restart Claude Code to see the new status line."
     exit 0
     ;;
-  mini)
+  mini|standard)
+    echo "Note: the 'mini'/'standard' subcommands are removed in this version."
+    echo "      claude-lifeline now ships with the mini layout only — running plain install."
     do_install
-    set_layout "mini"
-    echo ""
-    echo "Done! Restart Claude Code to apply mini layout."
-    exit 0
-    ;;
-  standard)
-    do_install
-    set_layout "auto"
-    echo ""
-    echo "Done! Restart Claude Code to apply standard layout."
     exit 0
     ;;
   uninstall)
@@ -264,7 +206,7 @@ case "$ACTION" in
     exit 0
     ;;
   *)
-    echo "Usage: $0 [install|upgrade|uninstall|dev|mini|standard]"
+    echo "Usage: $0 [install|upgrade|uninstall|dev]"
     exit 1
     ;;
 esac

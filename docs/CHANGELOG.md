@@ -4,7 +4,60 @@ All notable changes to claude-lifeline will be documented in this file.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-05-13
+
 ### Added
+- **Sonnet 7d quota indicator** — extra mini block appears next to the
+  regular 7d block when Sonnet-specific usage exceeds pace. Format
+  `S:U/P%! →HH:MM ↓Xh` (e.g., `S:87/68%! →5/13 16:08 ↓1d8h`). Source:
+  `seven_day_sonnet` field from `/api/oauth/usage` (was previously
+  ignored). Designed as a quiet signal — block is hidden entirely
+  when Sonnet usage is within pace. Useful for plans where Sonnet has
+  a separate quota cap that can be burned faster than the overall 7d
+  total.
+- **macOS Keychain credential fallback** — when
+  `~/.claude/.credentials.json` is absent (the common case on macOS
+  where Claude.app stores credentials in Keychain), `auth.rs` now
+  falls back to `security find-generic-password -s "Claude Code-credentials"`.
+  Failures from the keychain subprocess are reported to stderr instead
+  of silently disabling the API fallback path.
+
+### Changed
+- **Mini layout is now the only layout** — removed the dual-line
+  "standard" layout with progress bars, pace markers, and verbose
+  suffixes. The `[display].layout` config field is gone (the `Layout`
+  enum and its `auto / single / multi / mini` variants no longer
+  exist). Existing `layout = "..."` lines in `config.toml` are
+  ignored by TOML extra-key tolerance — no migration required.
+- **Terminal width default raised from 80 → 200** — Claude.app GUI
+  subprocesses have no controlling terminal, so all three width
+  probes (`COLUMNS` env / `terminal_size()` on std fds / `/dev/tty`
+  ioctl) return None, and the default kicks in. The previous 80
+  caused ~120-column mini single-lines to wrap into two physical
+  lines on wide CC displays. New default trades that for occasional
+  mid-block wraps on genuinely narrow terminals.
+- **Cache fields preserve Sonnet across rate_limits writes** — every
+  Claude Code hook invocation writes the cache from `stdin.rate_limits`,
+  which has no per-model fields. To stop the Sonnet pct/resets_at from
+  being repeatedly wiped, the rate_limits write path now reads the
+  existing cache first and carries over a still-fresh `seven_day_sonnet`
+  entry. `is_cache_fresh()` also includes `seven_day_sonnet_resets_at`
+  in its expiry check.
+- **`read_cache` switched to `tokio::fs`** — was synchronous I/O in an
+  async function; minor but eliminates tokio-reactor blocking and adds
+  the `fs` tokio feature.
+
+### Fixed
+- **`cache_ttl::check_and_update` same-call branch never wrote state** —
+  on a repeat observation of the same `cache_read` value, the function
+  returned `prev.last_active_at` but skipped `write_state`, so a stale
+  `last_expired_at` from a previous run would persist in the per-session
+  state file. The next time `cache_read` dropped to 0 (e.g., new session
+  on the same session_id), `within_expired_window` would falsely trigger
+  for up to 60s. Same-call branch now writes state explicitly with
+  `last_expired_at: None`.
+
+### Added (previous)
 - **Independent cache segment** — cache info (hit rate + TTL countdown)
   now renders as its own segment between `ctx` and `5h`, no longer
   embedded in the `ctx` block. Standard mode: `cache 96% 4m12s`; mini:

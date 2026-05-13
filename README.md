@@ -6,42 +6,33 @@ A fast Rust status line for [Claude Code](https://docs.anthropic.com/en/docs/cla
 
 ## Preview
 
-**Standard layout** — full information density across two lines
-
-![claude-lifeline standard layout](docs/img.png)
-
-```
-[Opus 4.6]  ~/Developer/Repos/my-project  git:(main* ↑2)  1h 23m
-ctx █████░░░░░ 53%  │  5h ████░░|░░░░ 34%(1h 23m)  │  7d ██|█░░░░░░░ 22%!/p14.05%(6d 0h ETA 4/19 08:18 wait 13h)
-```
-
-**Mini layout** — single-line color-block bar (`layout = "mini"`)
+Single-line color-block bar with everything inline.
 
 ![claude-lifeline mini layout](docs/img-mini.png)
 
 ```
- Opus  claude-lifeline  master  ctx 21%  28/51% 5h  33/44% 7d
+ Opus 4.7 1M  claude-lifeline  master  +95 -442  ctx 21%  100% 3m19s  3/28%  63/68%  S:87/68%! →5/13 16:08 ↓1d8h
 ```
 
 ## Why claude-lifeline?
 
 Claude Code's default status bar shows basic usage percentages — but that tells you nothing about whether you're *on track* to last the full window.
 
-claude-lifeline adds **pace intelligence**: a visual system that compares your actual consumption rate against the ideal pace for each quota window, and warns you before you burn out.
+claude-lifeline adds **pace intelligence**: it compares your actual consumption rate against the ideal pace for each quota window, and warns you before you burn out.
 
 ### What you get at a glance
 
-- **Pace marker `|`** in the progress bar — shows where you *should* be based on elapsed time. When your filled blocks `█` extend past `|`, you're consuming too fast
-- **Over-pace alert `!`** — triggers when usage exceeds pace by more than 5%, turns the bar yellow so you notice immediately
-- **Depletion ETA** — predicts the exact local time your quota hits 100% at current burn rate (e.g., `ETA 16:30`). Only appears when you're actually at risk
-- **Recovery wait time** — tells you how long to pause so your pace catches up (e.g., `wait 45m` = stop for 45 minutes and you're back on track)
-- **Context token breakdown** — when context window reaches 85%+, shows input vs cache token counts so you know what's eating your context
+- **Over-pace alert `!`** — appended to the quota when actual usage runs ahead of the elapsed-time pace
+- **Depletion ETA `→HH:MM`** — predicts the local time your quota hits 100% at the current burn rate (only shown when over-pace)
+- **Recovery wait `↓Xh`** — tells you how long to pause so your pace catches up
+- **Sonnet sub-quota alert** — when Sonnet-specific usage outruns pace, an extra `S:U/P%!` block appears next to the regular 7d block (hidden otherwise)
+- **Cache TTL countdown** — separate cache segment shows hit rate and predicted prompt-cache expiry, turns red when the cache has actually died
 
 ### Also included
 
 - Git branch, dirty status, ahead/behind upstream
-- Session duration timer
-- Configurable segments — toggle context, 5h quota, 7d quota on/off via TOML config
+- Session edit stats (`+lines_added` / `-lines_removed`)
+- Configurable segments — toggle context, 5h quota, 7d quota, cache, edit stats on/off via TOML
 - **~30ms** response, **~3MB** binary, zero runtime dependencies (static on Linux/Windows, signed on macOS)
 
 ## Install
@@ -64,7 +55,7 @@ Share this repo URL with Claude Code — it will read the instructions below and
 >    ```json
 >    "statusLine": { "type": "command", "command": "~/.claude/bin/claude-lifeline", "refreshInterval": 15 }
 >    ```
->    Do NOT overwrite the entire file — preserve all existing settings. `refreshInterval: 15` keeps the cache TTL countdown and quota ETA close to live (Claude Code's default is event-driven and freezes during idle). If the user already has a custom `refreshInterval`, leave it untouched.
+>    Do NOT overwrite the entire file — preserve all existing settings. `refreshInterval: 15` keeps the cache TTL countdown and quota ETA close to live. If the user already has a custom `refreshInterval`, leave it untouched.
 > 4. Tell the user to restart Claude Code to activate the new status line.
 
 ### Manual install
@@ -115,7 +106,8 @@ Then add to `~/.claude/settings.json`:
 {
   "statusLine": {
     "type": "command",
-    "command": "~/.claude/bin/claude-lifeline"
+    "command": "~/.claude/bin/claude-lifeline",
+    "refreshInterval": 15
   }
 }
 ```
@@ -129,23 +121,6 @@ curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/insta
 
 Windows: re-run the install command — it auto-detects and skips if already up to date.
 
-### Switch Layout
-
-```bash
-# macOS / Linux — switch to the compact mini layout (single-line color blocks)
-curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.sh | bash -s mini
-# back to the standard 2-line layout
-curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.sh | bash -s standard
-```
-
-```powershell
-# Windows
-& { $env:ACTION='mini';     irm https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.ps1 | iex }
-& { $env:ACTION='standard'; irm https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.ps1 | iex }
-```
-
-These run a full install (auto-upgrades the binary if a newer release is available, skips the download if already up to date), then write the layout to `~/.claude/claude-lifeline/config.toml` while preserving any other settings.
-
 ### Uninstall
 
 ```bash
@@ -158,194 +133,30 @@ curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/insta
 & { $env:ACTION='uninstall'; irm https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.ps1 | iex }
 ```
 
-## Features
+## Layout
 
-### Line 1 — Session Info
-
-```
-[Opus 4.7]  ~/Developer/Repos/my-project  git:(main* ↑2)  +1.3k -344  1h 23m
- ^^^^^^^^^   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^      ^^^^^^^^^    ^^^^^^^^^   ^^^^^^
- Model       CWD (HOME → ~)              Git status       Edit stats   Session duration
-```
-
-- **Model** — display name from Claude Code (e.g., `Sonnet 4.6`, `Opus 4.7`, `Haiku 4.5`, or `Opus 4.7 (1M context)`)
-- **CWD** — full path with `$HOME` collapsed to `~`
-- **Git status** — branch, dirty flag (`*`), ahead (`↑N` green) / behind (`↓N` red) upstream. Omitted entirely when `cwd` is not inside a git repo or when `git` isn't on `$PATH`.
-- **Edit stats** — lines Claude Code added (`+N` green) and removed (`-N` red) during the current session. Only rendered when either is non-zero; toggle with `display.edit_stats = false`. See note below on what's counted.
-- **Session duration** — elapsed time since session start, shown in dim text
-
-> **About edit stats**: the `+X -Y` figures come from Claude Code's
-> `cost.total_lines_added` / `total_lines_removed` — a session-scoped
-> counter that tallies every line touched by the Edit and Write tools.
-> It is **not** filtered by `.gitignore`, and it does **not** correspond
-> to `git diff` against any commit; it simply reflects how much work
-> Claude did this session, including edits to build artefacts or
-> gitignored scratch files. Reset when you start a new session.
-
-### Line 2 — Resource Usage
+A compact single-line bar with everything inline as colored blocks.
 
 ```
-ctx █████░░░░░ 53%  │  5h ████░░|░░░░ 34%(1h 23m)  │  7d ██|█░░░░░░░ 22%!/p14.05%(...)
-^^^                    ^^                               ^^
-Context window         5-hour quota                     7-day quota
+ Opus 4.7 1M  claude-lifeline  master  +95 -442  ctx 21%  100% 3m19s  3/28%  63/68%  S:87/68%! →5/13 16:08 ↓1d8h
+ ^^^^^^^^^^^  ^^^^^^^^^^^^^^^  ^^^^^^  ^^^^^^^^  ^^^^^^^  ^^^^^^^^^^  ^^^^^  ^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Model        Project          Git     Edits     Context  Cache       5h     7d      Sonnet 7d (over-pace only)
 ```
 
-### Context Window (`ctx`)
+### Block breakdown
 
-10-block progress bar showing context window usage.
-
-| Color | Threshold | Meaning |
-|-------|-----------|---------|
-| Green | `< 60%` | Comfortable headroom |
-| Yellow | `60–70%` | Getting close |
-| Red | `≥ 70%` | Approaching limit |
-
-When context reaches **≥ 85%**, a token breakdown appears:
-
-```
-ctx █████████░ 92% (in:120k c:65k)
-                    ^^^^^^  ^^^^^
-                    Input    Cache (creation + read)
-```
-
-### Rate Limit Quotas (`5h` / `7d`)
-
-Each quota segment contains a progress bar, percentage, and suffix info:
-
-#### Progress Bar
-
-```
-██|█░░░░░░░
-^^|^
-Filled blocks (actual usage)
-  |
-  Pace marker (expected position based on elapsed time)
-```
-
-- **`█`** — filled blocks in quota color, count reflects actual usage percentage
-- **`|`** — pace marker (bold white), inserted at the position representing how much time has elapsed in the window. It does **not** replace filled blocks
-- **`░`** — empty blocks (dim)
-
-#### Percentage & Alerts
-
-```
-22%!/p14.05%
-^^^  ^^^^^^^
-Usage  Pace position (only shown when over-pace)
-   ^
-   ! = over-pace alert
-```
-
-- **Usage `%`** — current quota consumption
-- **`!`** — appended when usage exceeds pace by more than 5% (over-pace)
-- **`/p14.05%`** — pace position, i.e., how much time has elapsed relative to the total window. Only displayed when over-pace
-
-#### Suffix: Reset, ETA, Recovery
-
-```
-(6d 0h ETA 4/19 08:18 wait 13h)
- ^^^^^  ^^^^^^^^^^^^^^  ^^^^^^^^
- Reset   Depletion ETA   Recovery time
-```
-
-- **Reset countdown** — time until the window resets: `59m`, `3h 55m`, `6d 0h`
-- **`ETA`** — **predicted** local time when quota will hit 100% at current burn rate. **This is NOT the actual reset/expiration time.** Only shown when over-pace and depletion would occur before window reset
-  - Same day: `ETA 16:30`
-  - Cross-day: `ETA 4/19 01:22`
-- **`wait`** — how long you need to pause for your pace to catch up to current usage level. Only shown when over-pace
-  - Example: `wait 59m` means "stop for ~59 minutes and your consumption will be back on track"
-
-#### Color Thresholds
-
-| Condition | Color |
-|-----------|-------|
-| Usage `< 75%`, on pace | Blue |
-| Usage `75–90%` or over-pace (`!`) | Yellow |
-| Usage `≥ 90%` | Red |
-
-### Complete Examples
-
-**Normal — within pace**
-
-```
-5h ██░░░░|░░░░ 18%(3h 55m)
-   ^^^^^^       ^^^ ^^^^^^^
-   │             │   └─ Window resets in 3h 55m (you get a fresh quota then)
-   │             └─ 18% of 5h quota consumed
-   └─ 2 filled blocks = 18% used, pace marker | at position 6 = ~60% of window elapsed
-      You're using slower than expected — no alerts
-```
-
-**Over-pace — burning too fast**
-
-```
-5h █████░|░░░░ 52%!/p32.15%(2h 10m ETA 16:30 wait 45m)
-   ^^^^^^       ^^^  ^^^^^^^ ^^^^^  ^^^^^^^^  ^^^^^^^^
-   │             │    │       │      │         └─ Stop for ~45min to get back on pace
-   │             │    │       │      └─ At this burn rate, quota hits 100% by 16:30 today
-   │             │    │       └─ Window resets in 2h 10m
-   │             │    └─ Only 32.15% of the 5h window has elapsed (pace position)
-   │             └─ 52% used + ! = over-pace alert (52% usage vs 32% pace, gap > 5%)
-   └─ 5 filled blocks = 52% used, pace marker | at position 3 = ~32% time elapsed
-      Usage is ahead of the pace marker — you're consuming faster than the window allows
-```
-
-**Critical — approaching limit**
-
-```
-5h █████████|░ 93%!/p85.00%(25m ETA 15:05 wait 12m)
-   ^^^^^^^^^^      ^^^^^^^^  ^^^  ^^^^^^^  ^^^^^^^^
-   │                │        │    │        └─ Pause ~12min to align with pace
-   │                │        │    └─ At this rate, quota depletes by 15:05
-   │                │        └─ Resets in 25 minutes
-   │                └─ 85% of the window has passed
-   └─ 9 filled blocks = 93%, pace marker near end — almost out of time AND quota
-```
-
-**7-day window — cross-day ETA**
-
-```
-7d ██|█░░░░░░░ 22%!/p14.05%(6d 0h ETA 4/19 08:18 wait 13h)
-   ^^^          ^^^  ^^^^^^^ ^^^^  ^^^^^^^^^^^^^^  ^^^^^^^^
-   │             │    │       │     │               └─ Stop for ~13h to realign
-   │             │    │       │     └─ Projected depletion: April 19 at 08:18
-   │             │    │       └─ Window resets in 6 days 0 hours
-   │             │    └─ Only 14.05% of the 7-day window has elapsed
-   │             └─ 22% used + ! (22% vs 14%, gap > 5%)
-   └─ Pace marker | at position 1 (~14%), filled blocks reach position 2 (~22%)
-```
-
-> **Key concept**: The pace marker `|` represents "where you *should* be" based on elapsed time. If filled blocks `█` extend past `|`, you're ahead of pace (over-consuming). The further apart they are, the more aggressively you're burning quota.
-
-## Mini Layout
-
-A compact single-line variant. Everything you'd see across two lines in the standard layout is collapsed into colored blocks side-by-side. Enable it with:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.sh | bash -s mini
-```
-
-Or set `layout = "mini"` in `~/.claude/claude-lifeline/config.toml`.
-
-![mini layout breakdown](docs/img-mini.png)
-
-```
- Opus  claude-lifeline  master  ctx 21%  28/51% 5h  33/44% 7d
- ^^^^  ^^^^^^^^^^^^^^^  ^^^^^^  ^^^^^^^  ^^^^^^^^^  ^^^^^^^^^
- Model Project          Git     Context  5-hour     7-day
-```
-
-### Block Breakdown
-
-| Block | Content | Background colour |
-|-------|---------|-------------------|
-| Model | `Opus` / `Sonnet` / `Haiku` / first word of unknown model | **Intensity-coded** — see table below |
+| Block | Content | Background |
+|-------|---------|------------|
+| Model | `Opus 4.7` / `Sonnet 4.6` / `Haiku 4.5` / `Opus 4.7 1M` etc. | **Intensity-coded** — see table below |
 | Project | `cwd` basename, truncated to 16 cols with `..` if longer | Cadet teal |
 | Git | `branch[*][ ↑N][ ↓N]` — branch name truncated to 16 cols | Warm orange |
+| Edits | `+lines_added -lines_removed` from Claude Code's session counter | Neutral gray |
 | Context | `ctx N%` | **Green / Yellow / Red** by threshold |
-| 5h / 7d quota | `used%/pace% Lh` (e.g., `28/51% 5h`); over-pace adds `!` and ` ETA HH:MM` | **Blue / Yellow / Red** by threshold + over-pace |
+| Cache | `hit% remaining` (e.g., `100% 3m19s`); `expired` when cache has died | **Blue / Yellow / Red** |
+| 5h / 7d quota | `U/P%` (e.g., `3/28%`); over-pace adds `!`, depletion ETA, recovery wait | **Blue / Yellow / Red** by threshold + over-pace |
+| Sonnet 7d | `S:U/P%!` — only appears when Sonnet usage exceeds pace | Yellow / Red |
 
-### Model Intensity Colors
+### Model intensity colors
 
 The model block hue reflects tier:
 
@@ -356,7 +167,7 @@ The model block hue reflects tier:
 | `Haiku` | Cyan (256 #38) | Light & fast |
 | Other / unknown | Gray (256 #102) | Fallback |
 
-### Context Color Thresholds (mini & standard)
+### Context color thresholds
 
 | Color | Threshold |
 |-------|-----------|
@@ -364,54 +175,66 @@ The model block hue reflects tier:
 | Yellow | `60–70%` |
 | Red | `≥ 70%` |
 
-### Quota Color Thresholds (mini)
+### Quota color thresholds
 
 | Color | Condition |
 |-------|-----------|
-| Blue | usage `< 75%` AND on pace |
-| Yellow | usage `75–90%` OR over-pace |
-| Red | usage `≥ 90%` |
+| Blue | usage `< yellow_at` AND on pace |
+| Yellow | `yellow_at ≤ usage < red_at` OR over-pace |
+| Red | usage `≥ red_at` |
 
-### Over-Pace Indicator
+Defaults: `yellow_at = 75 / red_at = 90` for 5h, `yellow_at = 80 / red_at = 90` for 7d.
+
+### Over-pace indicator
 
 When a quota's actual usage exceeds the elapsed-time pace, the block:
 
-1. Switches to yellow (or stays red if already `≥ 90%`)
+1. Switches to yellow (or stays red if already `≥ red_at`)
 2. Appends `!` after the percentage pair
-3. Appends ` ETA HH:MM` showing the projected depletion time (cross-day uses `M/D HH:MM`)
+3. Appends ` →HH:MM` showing the projected depletion time (cross-day uses `M/D HH:MM`)
+4. Appends ` ↓Xh` showing how long to pause for pace to catch up
 
 ```
-85/23%! 5h ETA 09:35
-^^ ^^   ^   ^^^^^^^^
-│  │    │   └─ Predicted depletion at 09:35 local time
-│  │    └─ Over-pace alert
+85/23%! →9:35 ↓2h
+^^ ^^   ^^^^^ ^^^^
+│  │    │     └─ Pause ~2h to align with pace
+│  │    └─ Predicted depletion at 09:35 local
 │  └─ Pace position: 23% of the 5h window has elapsed
 └─ 85% of the 5h quota consumed (way ahead of pace)
 ```
 
-### Width-Aware Wrapping
+### Sonnet sub-quota
 
-Mini auto-adapts to the terminal width:
+When Sonnet has its own quota cap (some Max plans), `seven_day_sonnet` from the usage API tracks that separately. The Sonnet block only renders **when Sonnet usage exceeds pace** — quiet by design, alerts you only when you're burning Sonnet faster than the 7-day window allows.
+
+```
+63/68%  S:87/68%! →5/13 16:08 ↓1d8h
+^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+│       └─ Sonnet at 87% with only 68% of the 7d window elapsed — over-pace
+└─ Overall 7d at 63% (within pace, normal blue)
+```
+
+### Cache segment
+
+```
+100% 3m19s     # alive, normal — blue background, hit rate + estimated remaining TTL
+30%  4m12s     # alive but low hit rate — yellow (cache rebuild in progress)
+expired        # cache just died (60s after detected real TTL expiry) — red
+```
+
+Hit rate is `cache_read / (input + cache_read + cache_creation)` from the most recent API turn. Remaining time is predicted as `last_active + 5min` (Anthropic exposes no server-side cache state API). Disappears when there's no usable signal.
+
+### Width-aware wrapping
+
+The bar auto-adapts to the terminal width:
 
 - **Wide enough** → all blocks on one line
-- **Narrow** → splits into two lines: `model + project + git` on line 1, `ctx + 5h + 7d` on line 2
+- **Narrow** → splits into two lines: `model + project + git + edits` on line 1, `ctx + cache + 5h + 7d + sonnet` on line 2
 - **Very narrow** → one block per line
 
 The 1-column gap between blocks ensures adjacent same-color segments stay distinguishable without separator characters.
 
-### Differences vs Standard
-
-Mini drops the following to keep the bar compact:
-
-- Progress bars (`█████░░░░░`)
-- Pace marker (`|`)
-- Token breakdown (`(in:Xk c:Yk)`)
-- Window reset countdown (`6d 0h`)
-- Recovery wait time (`wait 45m`)
-- Pace position (`/p32.15%`)
-- Session duration
-
-If you want any of those, use the standard layout instead.
+> About edit stats: the `+X -Y` figures come from Claude Code's `cost.total_lines_added` / `total_lines_removed` — a session-scoped counter that tallies every line touched by the Edit and Write tools. It is **not** filtered by `.gitignore`, and it does **not** correspond to `git diff`. Reset when you start a new session.
 
 ## Configuration
 
@@ -419,18 +242,11 @@ Optional config file at `~/.claude/claude-lifeline/config.toml`.
 
 ```toml
 [display]
-context = true     # Context window segment
-five_hour = true   # 5-hour quota segment
-seven_day = true   # 7-day quota segment
-edit_stats = true  # +lines_added / -lines_removed from Claude Code's session counter
-                   # (NOT filtered by .gitignore; see "Edit stats" note above)
-layout = "auto"    # Layout: auto | single | multi | mini
-                   #   auto   — detect terminal width; wrap per-segment if too narrow
-                   #   single — always single line (may be truncated)
-                   #   multi  — always one segment per line
-                   #   mini   — compact colored-block single line; everything inline,
-                   #            shows `model project git ctx N% U/P% 5h U/P% 7d`,
-                   #            block bg switches green/yellow/red on threshold/over-pace
+context    = true   # Context window block
+cache_hit  = true   # Cache hit rate + TTL block
+five_hour  = true   # 5-hour quota block
+seven_day  = true   # 7-day quota block (also gates Sonnet sub-quota block)
+edit_stats = true   # +lines_added / -lines_removed from Claude Code's session counter
 
 # Color thresholds (optional — defaults shown below)
 # Validation: each yellow_at must be < red_at and within [0, 100];
@@ -439,7 +255,6 @@ layout = "auto"    # Layout: auto | single | multi | mini
 [thresholds]
 ctx_yellow_at       = 60.0   # ctx >= this → yellow
 ctx_red_at          = 70.0   # ctx >= this → red
-ctx_token_detail_at = 85.0   # ctx >= this → show (in:Xk c:Yk) in standard layout
 
 # 5h / 7d quotas are tuned independently. 7d defaults are looser than 5h
 # because the longer reset window makes mid-range usage less urgent.
@@ -450,13 +265,10 @@ seven_day_red_at    = 90.0
 
 # Over-pace tolerance in percent. With pace_tolerance = 0 (strict), any
 # usage above the elapsed-time pace marker triggers the `!` alert. Raise
-# it to absorb short-lived bursts without flipping the whole segment
-# yellow — e.g., pace_tolerance = 5.0 means "only alert when we're >5%
-# ahead of pace".
+# it to absorb short-lived bursts — e.g., pace_tolerance = 5.0 means
+# "only alert when we're >5% ahead of pace".
 pace_tolerance      = 0.0
 ```
-
-Both mini and standard layouts read the same `[thresholds]` values. Mini ignores `ctx_token_detail_at` (it never renders the token breakdown).
 
 See [config.example.toml](config.example.toml) for reference.
 
@@ -466,10 +278,17 @@ Rate limit data is resolved in priority order:
 
 | Priority | Source | Notes |
 |----------|--------|-------|
-| 1 | `stdin.rate_limits` | Claude Code ≥ 2.1.80, no auth needed |
-| 2 | Local cache | `~/.claude/claude-lifeline/usage-cache.json`, 5min TTL |
-| 3 | API fallback | `api.anthropic.com/api/oauth/usage`, 2s timeout |
+| 1 | `stdin.rate_limits` | Claude Code ≥ 2.1.80, no auth needed; provides `five_hour` + `seven_day` only |
+| 2 | Local cache | `~/.claude/claude-lifeline/usage-cache.json`, 5min TTL; preserves Sonnet data across rate_limits writes |
+| 3 | API fallback | `api.anthropic.com/api/oauth/usage`, 2s timeout; provides Sonnet sub-quota |
 | 4 | Empty | Quota segments not displayed |
+
+### Credentials
+
+For the API fallback, OAuth token is read from:
+
+1. `~/.claude/.credentials.json` (Linux / Windows / older macOS)
+2. **macOS Keychain** — `security find-generic-password -s "Claude Code-credentials"` fallback for Claude.app installs where the credential file is absent
 
 ## Performance
 

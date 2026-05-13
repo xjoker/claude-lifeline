@@ -10,8 +10,8 @@ mod usage;
 
 #[tokio::main]
 async fn main() {
-    if let Err(_) = run().await {
-        return;
+    if run().await.is_err() {
+        // 任何失败都静默退出（statusline 不该污染终端），诊断信息由模块各自写 stderr
     }
 }
 
@@ -44,27 +44,21 @@ async fn run() -> anyhow::Result<()> {
         })
         .unwrap_or_default();
 
-    // 3. 会话时长：从 transcript 文件创建时间推算
-    let session_duration = stdin.transcript_path.as_deref()
-        .and_then(|p| std::fs::metadata(p).ok())
-        .and_then(|m| m.created().ok())
-        .and_then(|t| t.elapsed().ok());
-
-    // 4. 并发：git info + usage data
+    // 3. 并发：git info + usage data
     let (git, usage) = tokio::join!(
         crate::git::get_git_info(&cwd),
         crate::usage::get_usage_data(stdin.rate_limits.as_ref()),
     );
 
-    // 5. 读取配置
+    // 4. 读取配置
     let config = crate::config::read_config();
 
-    // 6. 升级提示（纯文件读取，sub-ms）
+    // 5. 升级提示（纯文件读取，sub-ms）
     let update_hint = crate::update::check_update_hint();
     crate::update::ensure_cache_exists();
 
-    // 7. 渲染输出
-    let ctx = crate::render::RenderContext { stdin, git, usage, session_duration, config, update_hint };
+    // 6. 渲染输出
+    let ctx = crate::render::RenderContext { stdin, git, usage, config, update_hint };
     crate::render::render(&ctx);
 
     Ok(())

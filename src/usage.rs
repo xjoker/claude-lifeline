@@ -8,6 +8,8 @@ use serde::Deserialize;
 pub struct UsageData {
     pub five_hour: Option<WindowUsage>,
     pub seven_day: Option<WindowUsage>,
+    /// Sonnet 专属 7d 额度（来自 API 的 seven_day_sonnet 字段）
+    pub seven_day_sonnet: Option<WindowUsage>,
 }
 
 #[derive(Debug, Clone)]
@@ -55,6 +57,10 @@ struct CachedUsage {
     five_hour_resets_at: Option<String>,
     seven_day_pct: Option<f64>,
     seven_day_resets_at: Option<String>,
+    #[serde(default)]
+    seven_day_sonnet_pct: Option<f64>,
+    #[serde(default)]
+    seven_day_sonnet_resets_at: Option<String>,
 }
 
 // ── API 响应结构 ──
@@ -63,6 +69,7 @@ struct CachedUsage {
 struct ApiUsageResponse {
     five_hour: Option<ApiWindow>,
     seven_day: Option<ApiWindow>,
+    seven_day_sonnet: Option<ApiWindow>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -109,9 +116,21 @@ pub async fn get_usage_data(rate_limits: Option<&RateLimits>) -> UsageData {
 
         let has_data = five_hour.is_some() || seven_day.is_some();
         if has_data {
+            // rate_limits 无 per-model 字段，保留缓存里已有的 sonnet 数据
+            let seven_day_sonnet = read_cache()
+                .await
+                .filter(is_cache_fresh)
+                .and_then(|c| c.data.seven_day_sonnet_pct.map(|pct| WindowUsage {
+                    used_percent: pct,
+                    resets_at: c.data.seven_day_sonnet_resets_at
+                        .as_deref()
+                        .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+                        .map(|dt| dt.with_timezone(&Utc)),
+                }));
             let usage = UsageData {
                 five_hour,
                 seven_day,
+                seven_day_sonnet,
             };
             // 同步写入缓存（fs::write，亚毫秒级，不阻塞渲染）
             write_cache(&usage);
@@ -120,7 +139,7 @@ pub async fn get_usage_data(rate_limits: Option<&RateLimits>) -> UsageData {
     }
 
     // 优先级 2: 缓存文件
-    if let Some(cache) = read_cache() {
+    if let Some(cache) = read_cache().await {
         if is_cache_fresh(&cache) {
             let usage = cached_to_usage(&cache.data);
             return usage;
@@ -137,6 +156,7 @@ pub async fn get_usage_data(rate_limits: Option<&RateLimits>) -> UsageData {
     UsageData {
         five_hour: None,
         seven_day: None,
+        seven_day_sonnet: None,
     }
 }
 
@@ -194,37 +214,6 @@ pub fn calc_pace(window: &WindowUsage, window_secs: i64, tolerance: f64) -> Opti
     })
 }
 
-/// 格式化重置时间（Xm / Xh Ym / Xd Yh）
-pub fn format_reset_time(resets_at: &chrono::DateTime<chrono::Utc>) -> String {
-    let now = Utc::now();
-    let diff = *resets_at - now;
-    let total_secs = diff.num_seconds();
-
-    if total_secs <= 0 {
-        return String::new();
-    }
-
-    let total_minutes = total_secs / 60;
-    let total_hours = total_secs / 3600;
-    let total_days = total_secs / 86400;
-
-    if total_hours < 1 {
-        // < 1h → "Xm"
-        let minutes = total_minutes.max(1);
-        format!("{minutes}m")
-    } else if total_days < 1 {
-        // < 24h → "Xh Ym"
-        let hours = total_hours;
-        let minutes = (total_secs % 3600) / 60;
-        format!("{hours}h {minutes}m")
-    } else {
-        // >= 1d → "Xd Yh"
-        let days = total_days;
-        let hours = (total_secs % 86400) / 3600;
-        format!("{days}d {hours}h")
-    }
-}
-
 // ── 私有辅助函数 ──
 
 /// 缓存文件路径: ~/.claude/claude-lifeline/usage-cache.json
@@ -238,10 +227,10 @@ fn cache_path() -> std::path::PathBuf {
         .join("usage-cache.json")
 }
 
-/// 读取缓存文件
-fn read_cache() -> Option<CacheFile> {
+/// 读取缓存文件（async，避免阻塞 tokio reactor）
+async fn read_cache() -> Option<CacheFile> {
     let path = cache_path();
-    let content = std::fs::read_to_string(path).ok()?;
+    let content = tokio::fs::read_to_string(path).await.ok()?;
     serde_json::from_str(&content).ok()
 }
 
@@ -264,6 +253,11 @@ fn write_cache(data: &UsageData) {
             .seven_day
             .as_ref()
             .and_then(|w| w.resets_at.map(|dt| dt.to_rfc3339())),
+        seven_day_sonnet_pct: data.seven_day_sonnet.as_ref().map(|w| w.used_percent),
+        seven_day_sonnet_resets_at: data
+            .seven_day_sonnet
+            .as_ref()
+            .and_then(|w| w.resets_at.map(|dt| dt.to_rfc3339())),
     };
 
     let cache_file = CacheFile {
@@ -284,7 +278,11 @@ fn is_cache_fresh(cache: &CacheFile) -> bool {
     }
     // resets_at 已过期则缓存无效（窗口已重置）
     let now_dt = Utc::now();
-    for resets_at_str in [&cache.data.five_hour_resets_at, &cache.data.seven_day_resets_at].into_iter().flatten() {
+    for resets_at_str in [
+        &cache.data.five_hour_resets_at,
+        &cache.data.seven_day_resets_at,
+        &cache.data.seven_day_sonnet_resets_at,
+    ].into_iter().flatten() {
         if let Ok(dt) = DateTime::parse_from_rfc3339(resets_at_str) {
             if dt.with_timezone(&Utc) < now_dt {
                 return false;
@@ -314,9 +312,19 @@ fn cached_to_usage(cached: &CachedUsage) -> UsageData {
             .map(|dt| dt.with_timezone(&Utc)),
     });
 
+    let seven_day_sonnet = cached.seven_day_sonnet_pct.map(|pct| WindowUsage {
+        used_percent: pct,
+        resets_at: cached
+            .seven_day_sonnet_resets_at
+            .as_deref()
+            .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+            .map(|dt| dt.with_timezone(&Utc)),
+    });
+
     UsageData {
         five_hour,
         seven_day,
+        seven_day_sonnet,
     }
 }
 
@@ -363,8 +371,18 @@ async fn fetch_usage_from_api() -> Option<UsageData> {
             .map(|dt| dt.with_timezone(&Utc)),
     });
 
+    let seven_day_sonnet = api_resp.seven_day_sonnet.map(|w| WindowUsage {
+        used_percent: w.utilization.unwrap_or(0.0),
+        resets_at: w
+            .resets_at
+            .as_deref()
+            .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+            .map(|dt| dt.with_timezone(&Utc)),
+    });
+
     Some(UsageData {
         five_hour,
         seven_day,
+        seven_day_sonnet,
     })
 }

@@ -1,71 +1,62 @@
 # claude-lifeline
 
-高性能 Rust 状态栏，为 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 打造，替代默认状态栏，提供丰富功能，响应时间低于 50ms。支持 **macOS**、**Linux** 和 **Windows**。
+为 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 打造的快速 Rust 状态栏，替代默认状态条，亚 50ms 原生二进制。支持 **macOS**、**Linux** 和 **Windows**。
 
 **[English](../README.md)**
 
 ## 预览
 
-**标准布局** — 信息密度最高，分两行展示
-
-![claude-lifeline 标准布局](img.png)
-
-```
-[Opus 4.6]  ~/Developer/Repos/my-project  git:(main* ↑2)  1h 23m
-ctx █████░░░░░ 53%  │  5h ████░░|░░░░ 34%(1h 23m)  │  7d ██|█░░░░░░░ 22%!/p14.05%(6d 0h ETA 4/19 08:18 wait 13h)
-```
-
-**Mini 布局** — 单行色块紧凑模式（`layout = "mini"`）
+单行色块紧凑模式，全部信息内联。
 
 ![claude-lifeline mini 布局](img-mini.png)
 
 ```
- Opus  claude-lifeline  master  ctx 21%  28/51% 5h  33/44% 7d
+ Opus 4.7 1M  claude-lifeline  master  +95 -442  ctx 21%  100% 3m19s  3/28%  63/68%  S:87/68%! →5/13 16:08 ↓1d8h
 ```
 
-## 为什么选择 claude-lifeline？
+## 为什么用 claude-lifeline？
 
-Claude Code 默认状态栏只显示基本的使用百分比 — 但这无法告诉你，按当前速度用下去，配额够不够撑到窗口结束。
+Claude Code 默认状态栏只显示基础用量百分比——它告诉不了你是否**按节奏**用得完整个窗口。
 
-claude-lifeline 增加了**配速智能**：一套可视化系统，将你的实际消耗速率与每个配额窗口的理想配速进行对比，在你耗尽之前发出预警。
+claude-lifeline 加入**配速智能**：把实际消耗速率和每个配额窗口的理想配速做对比，在你烧光之前提醒你。
 
-### 一眼看到什么
+### 一眼看到的信息
 
-- **配速标记 `|`** — 进度条中的白色竖线，标示"基于已过时间，你应该在的位置"。当填充块 `█` 超过 `|` 时，说明消耗过快
-- **超速警告 `!`** — 使用率超出配速 5% 以上时触发，进度条变黄，立即引起注意
-- **耗尽预测 ETA** — 按当前消耗速率，预测配额何时耗尽（如 `ETA 16:30`）。仅在真正面临风险时才显示
-- **恢复等待时间** — 告诉你需要暂停多久，让配速追上使用率（如 `wait 45m` = 停工 45 分钟即可恢复正常节奏）
-- **上下文 token 明细** — 当上下文窗口达到 85% 以上时，显示输入 vs 缓存 token 数量，帮你了解上下文被什么占满
+- **超速告警 `!`**——当实际用量超过时间已过比例的配速时，加在百分比末尾
+- **耗尽时间 ETA `→HH:MM`**——按当前烧速预测多久打到 100%（仅超速时显示）
+- **恢复等待 `↓Xh`**——告诉你停多久配速能追上当前用量
+- **Sonnet 子配额告警**——当 Sonnet 专属用量超速时，在 7d 块旁追加一个 `S:U/P%!` 块（否则隐藏）
+- **缓存 TTL 倒计时**——独立 cache 段显示命中率和预测的 prompt 缓存剩余时间，缓存死掉变红
 
-### 还有这些
+### 其他功能
 
-- Git 分支、脏状态、领先/落后上游
-- 会话时长计时
-- 可配置段 — 通过 TOML 配置文件按需开关上下文、5h 配额、7d 配额
-- **~30ms** 响应，**~3MB** 二进制，零运行时依赖（Linux/Windows 静态链接，macOS 已签名）
+- Git 分支、dirty 状态、ahead/behind upstream
+- 会话编辑量（`+lines_added` / `-lines_removed`）
+- 段可配置——TOML 里开关 context / 5h / 7d / cache / edit stats
+- **~30ms** 响应、**~3MB** 二进制、零运行时依赖（Linux/Windows 静态，macOS 签名）
 
 ## 安装
 
-需要 **Claude Code ≥ 2.1.80**（用于 `stdin.rate_limits` 数据）。
+需要 **Claude Code ≥ 2.1.80**（用 `stdin.rate_limits`）。
 
-### 让 AI 帮你装（推荐）
+### 让 AI 帮你安装（推荐）
 
-把本项目链接丢给 Claude Code — 它会读取下方指令并自动完成安装。
+把这个仓库 URL 给 Claude Code，它会读取下面的说明完成安装。
 
-> **AI agents**: To install claude-lifeline, follow these steps:
-> 1. Detect the user's platform and download the correct binary from the [latest release](https://github.com/xjoker/claude-lifeline/releases/latest):
+> **AI agents**：要安装 claude-lifeline，按以下步骤执行：
+> 1. 探测用户平台，从 [latest release](https://github.com/xjoker/claude-lifeline/releases/latest) 下载对应二进制：
 >    - macOS Apple Silicon: `claude-lifeline-aarch64-apple-darwin`
 >    - macOS Intel: `claude-lifeline-x86_64-apple-darwin`
 >    - Linux x86_64: `claude-lifeline-x86_64-unknown-linux-musl`
 >    - Linux ARM64: `claude-lifeline-aarch64-unknown-linux-musl`
 >    - Windows x86_64: `claude-lifeline-x86_64-pc-windows-msvc.exe`
-> 2. Save the binary to `~/.claude/bin/claude-lifeline` (Windows: `%USERPROFILE%\.claude\bin\claude-lifeline.exe`), create the directory if it doesn't exist, make it executable (`chmod +x`), and on macOS run `xattr -d com.apple.quarantine ~/.claude/bin/claude-lifeline` to bypass Gatekeeper
-> 3. Edit `~/.claude/settings.json` — add or merge the following key into the existing JSON:
+> 2. 保存到 `~/.claude/bin/claude-lifeline`（Windows: `%USERPROFILE%\.claude\bin\claude-lifeline.exe`），目录不存在则创建，加可执行权限（`chmod +x`），macOS 上执行 `xattr -d com.apple.quarantine ~/.claude/bin/claude-lifeline` 绕过 Gatekeeper
+> 3. 编辑 `~/.claude/settings.json`，把以下 key 添加或合并到已有 JSON：
 >    ```json
 >    "statusLine": { "type": "command", "command": "~/.claude/bin/claude-lifeline", "refreshInterval": 15 }
 >    ```
->    Do NOT overwrite the entire file — preserve all existing settings. `refreshInterval: 15` keeps the cache TTL countdown and quota ETA close to live (Claude Code's default is event-driven and freezes during idle). If the user already has a custom `refreshInterval`, leave it untouched.
-> 4. Tell the user to restart Claude Code to activate the new status line.
+>    **不要**覆盖整个文件，保留其他设置。`refreshInterval: 15` 让 cache TTL 倒计时和 quota ETA 接近实时刷新。如果用户已有自定义 `refreshInterval`，保持不动。
+> 4. 告诉用户重启 Claude Code 激活新状态栏。
 
 ### 手动安装
 
@@ -81,11 +72,11 @@ curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/insta
 irm https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.ps1 | iex
 ```
 
-安装后重启 Claude Code 即可生效。
+安装后重启 Claude Code。
 
 ### 从源码构建
 
-一键 dev 安装 — cargo 构建、部署到 `~/.claude/bin/`、自动合并 `settings.json`：
+一键开发安装——用 cargo 构建、部署到 `~/.claude/bin/`、合并 `settings.json`：
 
 ```bash
 # macOS / Linux
@@ -101,7 +92,7 @@ cd claude-lifeline
 $env:ACTION='dev'; .\install.ps1
 ```
 
-或手动执行：
+或手动：
 
 ```bash
 cargo build --release
@@ -109,7 +100,7 @@ mkdir -p ~/.claude/bin
 cp target/release/claude-lifeline ~/.claude/bin/
 ```
 
-然后在 `~/.claude/settings.json` 中添加：
+然后在 `~/.claude/settings.json` 加入：
 
 ```json
 {
@@ -121,8 +112,6 @@ cp target/release/claude-lifeline ~/.claude/bin/
 }
 ```
 
-`refreshInterval: 15` 让 cache TTL 倒计时和 quota ETA 接近实时刷新（CC 默认事件驱动，idle 时数字会冻结）。已自定义此字段的用户保留原值。
-
 ### 升级
 
 ```bash
@@ -130,24 +119,7 @@ cp target/release/claude-lifeline ~/.claude/bin/
 curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.sh | bash -s upgrade
 ```
 
-Windows：重新运行安装命令即可 — 已是最新版本时会自动跳过。
-
-### 切换布局
-
-```bash
-# macOS / Linux — 切到 mini 紧凑色块布局
-curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.sh | bash -s mini
-# 切回标准两行布局
-curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.sh | bash -s standard
-```
-
-```powershell
-# Windows
-& { $env:ACTION='mini';     irm https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.ps1 | iex }
-& { $env:ACTION='standard'; irm https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.ps1 | iex }
-```
-
-这两条命令会先跑完整的 install（如果有新版本会自动升级 binary，已最新则跳过下载），再把布局写入 `~/.claude/claude-lifeline/config.toml`，其他配置项保留不动。
+Windows：重跑安装命令——会自动检测，已是最新则跳过。
 
 ### 卸载
 
@@ -161,331 +133,182 @@ curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/insta
 & { $env:ACTION='uninstall'; irm https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.ps1 | iex }
 ```
 
-## 功能详解
+## 布局
 
-### 第一行 — 会话信息
-
-```
-[Opus 4.7]  ~/Developer/Repos/my-project  git:(main* ↑2)  +1.3k -344  1h 23m
- ^^^^^^^^^   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^      ^^^^^^^^^    ^^^^^^^^^   ^^^^^^
- 模型         项目路径（HOME → ~）           Git 状态        改动量      会话时长
-```
-
-- **模型** — Claude Code 提供的 display_name（如 `Sonnet 4.6`、`Opus 4.7`、`Haiku 4.5`、`Opus 4.7 (1M context)`）
-- **项目路径** — cwd 完整路径，`$HOME` 折叠为 `~`
-- **Git 状态** — 分支名、脏标记（`*`）、领先（`↑N` 绿色）/ 落后（`↓N` 红色）上游。cwd 不在 git 仓库或 `git` 不在 `$PATH` 时**整段省略**，不留空位
-- **代码改动量** — 本会话 Claude 新增 `+N` 绿 / 删除 `-N` 红的行数。仅当两者任一非零才显示，可用 `display.edit_stats = false` 关闭。语义见下方说明
-- **会话时长** — 从 session 启动起的经过时间，暗色显示
-
-> **改动量数据说明**：`+X -Y` 来自 Claude Code 的 `cost.total_lines_added` /
-> `total_lines_removed`——这是**会话级**累计计数器，统计 Edit 和 Write 工具
-> 调用涉及的每一行。它**不会**过滤 `.gitignore`，也**不**对应任何 `git diff`
-> 的结果。它反映的是"本次会话 Claude 干了多少活"，包括改动构建产物和 ignored
-> 的草稿文件。新开 session 后重置。
-
-### 第二行 — 资源使用
+紧凑单行色块，全部信息内联。
 
 ```
-ctx █████░░░░░ 53%  │  5h ████░░|░░░░ 34%(1h 23m)  │  7d ██|█░░░░░░░ 22%!/p14.05%(...)
-^^^                    ^^                               ^^
-上下文窗口              5 小时配额                       7 天配额
+ Opus 4.7 1M  claude-lifeline  master  +95 -442  ctx 21%  100% 3m19s  3/28%  63/68%  S:87/68%! →5/13 16:08 ↓1d8h
+ ^^^^^^^^^^^  ^^^^^^^^^^^^^^^  ^^^^^^  ^^^^^^^^  ^^^^^^^  ^^^^^^^^^^  ^^^^^  ^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^^
+ 模型         项目             Git     编辑量    Context  Cache       5h     7d      Sonnet 7d（仅超速时出现）
 ```
 
-### 上下文窗口 (`ctx`)
+### 块说明
 
-10 格进度条显示上下文窗口使用率。
+| 块 | 内容 | 底色 |
+|-----|------|------|
+| 模型 | `Opus 4.7` / `Sonnet 4.6` / `Haiku 4.5` / `Opus 4.7 1M` 等 | **按强度配色**——见下表 |
+| 项目 | `cwd` basename，截断到 16 列，超出用 `..` | 灰青 |
+| Git | `分支[*][ ↑N][ ↓N]`——分支名截断到 16 列 | 暖橙 |
+| 编辑量 | `+lines_added -lines_removed`，来自 Claude Code 会话计数器 | 中性灰 |
+| Context | `ctx N%` | **绿 / 黄 / 红** 阈值切换 |
+| Cache | `hit% 剩余时间`（如 `100% 3m19s`）；缓存死掉显示 `expired` | **蓝 / 黄 / 红** |
+| 5h / 7d quota | `U/P%`（如 `3/28%`）；超速追加 `!`、ETA、恢复等待 | **蓝 / 黄 / 红** 阈值 + 超速切换 |
+| Sonnet 7d | `S:U/P%!`——只在 Sonnet 用量超速时出现 | 黄 / 红 |
 
-| 颜色 | 阈值 | 含义 |
+### 模型强度配色
+
+模型块底色反映等级：
+
+| 模型 | 底色 | 意义 |
 |------|------|------|
-| 绿色 | `< 60%` | 余量充足 |
-| 黄色 | `60–70%` | 接近上限 |
-| 红色 | `≥ 70%` | 即将用尽 |
-
-当上下文使用率 **≥ 85%** 时，显示 token 用量明细：
-
-```
-ctx █████████░ 92% (in:120k c:65k)
-                    ^^^^^^  ^^^^^
-                    输入 token  缓存 token（创建 + 读取）
-```
-
-### 速率限制配额 (`5h` / `7d`)
-
-每个配额段包含进度条、百分比和后缀信息：
-
-#### 进度条
-
-```
-██|█░░░░░░░
-^^|^
-填充块（实际使用量）
-  |
-  配速标记（基于已用时间的预期位置）
-```
-
-- **`█`** — 填充块，使用配额对应颜色，数量反映实际使用百分比
-- **`|`** — 配速标记（粗体白色），插入在时间窗口已过比例对应的位置。**不会替换**填充块
-- **`░`** — 空白块（暗色）
-
-#### 百分比与警告
-
-```
-22%!/p14.05%
-^^^  ^^^^^^^
-使用率  配速位置（仅超速时显示）
-   ^
-   ! = 超速警告
-```
-
-- **使用率 `%`** — 当前配额消耗百分比
-- **`!`** — 当使用率超过配速 5% 以上时追加（超速状态）
-- **`/p14.05%`** — 配速位置，即时间窗口已过比例。仅在超速时显示
-
-#### 后缀：重置时间、预计耗尽、恢复时长
-
-```
-(6d 0h ETA 4/19 08:18 wait 13h)
- ^^^^^  ^^^^^^^^^^^^^^  ^^^^^^^^
- 重置倒计时  预计耗尽时间   恢复等待时长
-```
-
-- **重置倒计时** — 窗口重置剩余时间：`59m`、`3h 55m`、`6d 0h`
-- **`ETA`** — 按当前消耗速率，**预测**配额将于何时耗尽（本地时间）。**这不是实际重置/到期时间。** 仅在超速且预计耗尽时间早于窗口重置时显示
-  - 当天：`ETA 16:30`
-  - 跨天：`ETA 4/19 01:22`
-- **`wait`** — 需要暂停多久，让配速追上当前使用率。仅在超速时显示
-  - 示例：`wait 59m` 表示"停工约 59 分钟，消耗就会回到正常节奏"
-
-#### 颜色阈值
-
-| 条件 | 颜色 |
-|------|------|
-| 使用率 `< 75%`，配速正常 | 蓝色 |
-| 使用率 `75–90%` 或超速（`!`） | 黄色 |
-| 使用率 `≥ 90%` | 红色 |
-
-### 完整示例
-
-**正常状态 — 配速内**
-
-```
-5h ██░░░░|░░░░ 18%(3h 55m)
-   ^^^^^^       ^^^ ^^^^^^^
-   │             │   └─ 窗口将在 3h 55m 后重置（届时获得全新配额）
-   │             └─ 5 小时配额已消耗 18%
-   └─ 2 个填充块 = 18% 已用，配速标记 | 在位置 6 = 窗口已过约 60%
-      使用速度低于预期 — 无警告
-```
-
-**超速状态 — 消耗过快**
-
-```
-5h █████░|░░░░ 52%!/p32.15%(2h 10m ETA 16:30 wait 45m)
-   ^^^^^^       ^^^  ^^^^^^^ ^^^^^  ^^^^^^^^  ^^^^^^^^
-   │             │    │       │      │         └─ 暂停约 45 分钟可恢复正常配速
-   │             │    │       │      └─ 按当前消耗速率，配额将在今天 16:30 耗尽
-   │             │    │       └─ 窗口将在 2h 10m 后重置
-   │             │    └─ 5h 窗口仅过了 32.15%（配速位置）
-   │             └─ 52% 已用 + ! = 超速警告（52% 使用 vs 32% 配速，差距 > 5%）
-   └─ 5 个填充块 = 52% 已用，配速标记 | 在位置 3 = 约 32% 时间已过
-      使用量超过了配速标记 — 消耗速度快于窗口允许的速率
-```
-
-**危险状态 — 接近上限**
-
-```
-5h █████████|░ 93%!/p85.00%(25m ETA 15:05 wait 12m)
-   ^^^^^^^^^^      ^^^^^^^^  ^^^  ^^^^^^^  ^^^^^^^^
-   │                │        │    │        └─ 暂停约 12 分钟可对齐配速
-   │                │        │    └─ 按当前速率，配额将在 15:05 耗尽
-   │                │        └─ 25 分钟后重置
-   │                └─ 窗口已过 85%
-   └─ 9 个填充块 = 93%，配速标记接近末端 — 时间和配额都快用完了
-```
-
-**7 天窗口 — 跨天 ETA**
-
-```
-7d ██|█░░░░░░░ 22%!/p14.05%(6d 0h ETA 4/19 08:18 wait 13h)
-   ^^^          ^^^  ^^^^^^^ ^^^^  ^^^^^^^^^^^^^^  ^^^^^^^^
-   │             │    │       │     │               └─ 停工约 13 小时可恢复正常
-   │             │    │       │     └─ 预计配额耗尽：4 月 19 日 08:18
-   │             │    │       └─ 窗口将在 6 天 0 小时后重置
-   │             │    └─ 7 天窗口仅过了 14.05%
-   │             └─ 22% 已用 + !（22% vs 14%，差距 > 5%）
-   └─ 配速标记 | 在位置 1（约 14%），填充块延伸到位置 2（约 22%）
-```
-
-> **核心概念**：配速标记 `|` 代表"基于已过时间，你*应该*在的位置"。如果填充块 `█` 超过了 `|`，说明你超前于配速（过度消耗）。两者距离越远，配额消耗越激进。
-
-## Mini 布局
-
-紧凑单行变体。把标准布局两行的所有信息压缩为并排色块。一键启用：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/install.sh | bash -s mini
-```
-
-或在 `~/.claude/claude-lifeline/config.toml` 设置 `layout = "mini"`。
-
-![mini 布局图解](img-mini.png)
-
-```
- Opus  claude-lifeline  master  ctx 21%  28/51% 5h  33/44% 7d
- ^^^^  ^^^^^^^^^^^^^^^  ^^^^^^  ^^^^^^^  ^^^^^^^^^  ^^^^^^^^^
- 模型   项目             Git     Context  5 小时配额  7 天配额
-```
-
-### 色块解读
-
-| 色块 | 内容 | 背景色 |
-|------|------|--------|
-| 模型 | `Opus` / `Sonnet` / `Haiku` / 未知模型取首词 | **按强度配色** — 见下表 |
-| 项目 | `cwd` 末段名，超过 16 列用 `..` 截断 | 灰青 |
-| Git | `分支名[*][ ↑N][ ↓N]` — 分支名超 16 列截断 | 暖橙 |
-| Context | `ctx N%` | **绿 / 黄 / 红** 按阈值切换 |
-| 5h / 7d 配额 | `已用%/配速% L`（如 `28/51% 5h`）；超速追加 `!` 和 ` ETA HH:MM` | **蓝 / 黄 / 红** 按阈值 + 超速切换 |
-
-### 模型强度色
-
-模型色块色调反映其等级：
-
-| 模型 | 背景色 | 含义 |
-|------|--------|------|
-| `Opus` | 紫红（256 #134） | 旗舰 — 能力最强 |
+| `Opus` | 紫红（256 #134） | 旗舰 |
 | `Sonnet` | 紫蓝（256 #99） | 平衡 |
 | `Haiku` | 青蓝（256 #38） | 轻快 |
 | 其他 / 未知 | 灰（256 #102） | 兜底 |
 
-### Context 颜色阈值（mini & standard 通用）
+### Context 颜色阈值
 
 | 颜色 | 阈值 |
 |------|------|
-| 绿色 | `< 60%` |
-| 黄色 | `60–70%` |
-| 红色 | `≥ 70%` |
+| 绿 | `< 60%` |
+| 黄 | `60–70%` |
+| 红 | `≥ 70%` |
 
-### Quota 颜色阈值（mini）
+### Quota 颜色阈值
 
 | 颜色 | 条件 |
 |------|------|
-| 蓝色 | 使用 `< 75%` 且不超速 |
-| 黄色 | 使用 `75–90%` 或 超速 |
-| 红色 | 使用 `≥ 90%` |
+| 蓝 | 用量 `< yellow_at` 且未超速 |
+| 黄 | `yellow_at ≤ 用量 < red_at` 或超速 |
+| 红 | 用量 `≥ red_at` |
+
+默认：5h `yellow_at = 75 / red_at = 90`，7d `yellow_at = 80 / red_at = 90`。
 
 ### 超速指示
 
-某个配额的实际用量超过基于已过时间的配速时，色块：
+当 quota 实际用量超过时间已过的配速时：
 
-1. 切换为黄底（已 `≥ 90%` 则保持红底）
-2. 在百分比对后追加 `!`
-3. 追加 ` ETA HH:MM` 显示预计耗尽时间（跨日用 `M/D HH:MM`）
+1. 切换到黄底（≥ `red_at` 则保持红）
+2. 百分比对后追加 `!`
+3. 追加 ` →HH:MM`——预测耗尽时间（跨天用 `M/D HH:MM`）
+4. 追加 ` ↓Xh`——停工多久能让配速追平用量
 
 ```
-85/23%! 5h ETA 09:35
-^^ ^^   ^   ^^^^^^^^
-│  │    │   └─ 按当前速率，本地时间 09:35 配额耗尽
-│  │    └─ 超速警告
-│  └─ 配速位置：5 小时窗口已过 23%
-└─ 已用 5h 配额 85%（远超配速）
+85/23%! →9:35 ↓2h
+^^ ^^   ^^^^^ ^^^^
+│  │    │     └─ 停 2h 配速能追上
+│  │    └─ 预测耗尽时间 09:35
+│  └─ 配速位置：5h 窗口已过 23%
+└─ 5h 配额已用 85%（远超配速）
 ```
 
-### 宽度自适应折行
+### Sonnet 子配额
 
-mini 布局会根据终端宽度自动调整：
+某些 Max 套餐里 Sonnet 有独立的配额上限，`/api/oauth/usage` 的 `seven_day_sonnet` 字段单独跟踪。Sonnet 块**只在 Sonnet 用量超速时**渲染——设计上保持安静，只在你 Sonnet 烧得比 7 天窗口允许的更快时告警。
 
-- **够宽** → 全部色块单行
-- **较窄** → 拆为两行：`模型 + 项目 + git` 第一行，`ctx + 5h + 7d` 第二行
-- **极窄** → 每个色块独占一行
+```
+63/68%  S:87/68%! →5/13 16:08 ↓1d8h
+^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+│       └─ Sonnet 87%，7d 窗口才过 68%——超速
+└─ 7d 总量 63%（未超速，正常蓝）
+```
 
-色块之间留 1 列空格分隔，相邻同色块也能区分，无需额外字符分隔符。
+### Cache 段
 
-### 与标准布局的差异
+```
+100% 3m19s     # 活，命中率正常——蓝底，命中率 + 预估剩余 TTL
+30%  4m12s     # 活但命中率低——黄底（缓存重建中）
+expired        # 缓存刚死（检测到真过期后的 60s 窗口）——红底
+```
 
-mini 模式为保持紧凑，省略以下信息：
+命中率 = `cache_read / (input + cache_read + cache_creation)`，取自最近一次 API turn。剩余时间预测为 `last_active + 5min`（Anthropic 没暴露 server 端缓存状态 API）。没有可用信号时隐藏。
 
-- 进度条（`█████░░░░░`）
-- 配速标记（`|`）
-- Token 明细（`(in:Xk c:Yk)`）
-- 窗口重置倒计时（`6d 0h`）
-- 恢复等待时间（`wait 45m`）
-- 配速位置百分比（`/p32.15%`）
-- 会话时长
+### 自适应宽度换行
 
-如果需要这些信息，请使用标准布局。
+根据终端宽度自动调整：
+
+- **足够宽** → 全部块一行
+- **窄** → 拆两行：`model + project + git + edits` 一行，`ctx + cache + 5h + 7d + sonnet` 一行
+- **极窄** → 每块一行
+
+块间 1 列空格保证相邻同色块仍可区分，无需分隔字符。
+
+> 关于编辑量：`+X -Y` 来自 Claude Code 的 `cost.total_lines_added` / `total_lines_removed`，是会话级计数器，统计 Edit / Write 工具碰过的所有行。**不**按 `.gitignore` 过滤，**不**对应任何 `git diff`。新会话重置。
 
 ## 配置
 
-可选配置文件 `~/.claude/claude-lifeline/config.toml`：
+可选配置文件 `~/.claude/claude-lifeline/config.toml`。
 
 ```toml
 [display]
-context = true     # context window 段
-five_hour = true   # 5h quota 段
-seven_day = true   # 7d quota 段
-edit_stats = true  # 代码改动量 +X -Y（来自 CC 会话计数器，不过滤 .gitignore；
-                   # 详见上方"改动量数据说明"）
-layout = "auto"    # 布局: auto | single | multi | mini
-                   #   auto   — 按终端宽度自动选择（窄则每段独占一行）
-                   #   single — 强制单行（可能被截断）
-                   #   multi  — 强制每段独占一行
-                   #   mini   — 极简色块单行：模型/项目/git/ctx/5h/7d 全压缩
+context    = true   # Context window 块
+cache_hit  = true   # 缓存命中率 + TTL 块
+five_hour  = true   # 5 小时 quota 块
+seven_day  = true   # 7 天 quota 块（同时控制 Sonnet 子块）
+edit_stats = true   # 来自 Claude Code 会话计数器的 +lines_added / -lines_removed
 
-# 颜色切换阈值（可选，下列为默认值）
-# 校验：每对 yellow_at 必须 < red_at 且落在 [0, 100]；
-#       不合法的对回退到默认值，其他字段不受影响
+# 颜色阈值（可选——下方为默认值）
+# 校验：每个 yellow_at 必须 < red_at 且在 [0, 100]；
+#       非法对单独回退到默认，其他字段保持。
 [thresholds]
-ctx_yellow_at       = 60.0   # ctx >= 该值 → 黄
-ctx_red_at          = 70.0   # ctx >= 该值 → 红
+ctx_yellow_at       = 60.0   # ctx >= 此值 → 黄
+ctx_red_at          = 70.0   # ctx >= 此值 → 红
 
-# 5h / 7d quota 独立配置。7d 默认比 5h 更宽松（80 vs 75），
-# 因为 7d 窗口更长，中段消耗不紧迫
+# 5h / 7d quota 独立调。7d 默认比 5h 宽松，因为更长的重置
+# 窗口让中段用量不那么紧急。
 five_hour_yellow_at = 75.0
 five_hour_red_at    = 90.0
 seven_day_yellow_at = 80.0
 seven_day_red_at    = 90.0
 
-# 超速容差（%）。pace_tolerance = 0 为严格模式，任何超过配速即触发 `!`。
-# 调大可以忽略短时突发，例如 pace_tolerance = 5.0 表示"超过配速 5% 才告警"
+# 超速容差（%）。pace_tolerance = 0（严格）下，用量一旦
+# 超过配速线就触发 `!`。调高可吸收短期冲量，比如
+# pace_tolerance = 5.0 表示"只在领先配速 >5% 时告警"。
 pace_tolerance      = 0.0
 ```
 
-mini 与 standard 布局共用同一组 `[thresholds]`。
+参考 [config.example.toml](../config.example.toml)。
 
-参见 [config.example.toml](../config.example.toml) 获取参考。
+## 数据源
 
-## 数据来源
+Rate limit 数据按优先级解析：
 
-速率限制数据按优先级解析：
-
-| 优先级 | 来源 | 说明 |
+| 优先级 | 来源 | 备注 |
 |--------|------|------|
-| 1 | `stdin.rate_limits` | Claude Code ≥ 2.1.80，无需认证 |
-| 2 | 本地缓存 | `~/.claude/claude-lifeline/usage-cache.json`，5 分钟 TTL |
-| 3 | API 回退 | `api.anthropic.com/api/oauth/usage`，2 秒超时 |
-| 4 | 空 | 不显示配额段 |
+| 1 | `stdin.rate_limits` | Claude Code ≥ 2.1.80，无需 auth；只提供 `five_hour` + `seven_day` |
+| 2 | 本地缓存 | `~/.claude/claude-lifeline/usage-cache.json`，5min TTL；rate_limits 写入时保留 Sonnet 数据 |
+| 3 | API fallback | `api.anthropic.com/api/oauth/usage`，2s 超时；提供 Sonnet 子配额 |
+| 4 | 空 | quota 段不显示 |
+
+### 凭证
+
+API fallback 用的 OAuth token 读取来源：
+
+1. `~/.claude/.credentials.json`（Linux / Windows / 老版 macOS）
+2. **macOS Keychain** —— `security find-generic-password -s "Claude Code-credentials"` 兜底，覆盖 Claude.app 不写凭证文件的情况
 
 ## 性能
 
-- **~30ms** 响应时间（远低于 Claude Code 的 500ms 限制）
-- **~3MB** 发布二进制（LTO + strip）
-- Git 命令、用量数据获取通过 `tokio::join!` 并发执行
-- 所有二进制均为完全静态链接（Linux 使用 musl，Windows 使用静态 CRT）
+- **~30ms** 响应（远低于 Claude Code 500ms 预算）
+- **~3MB** release 二进制（LTO + strip）
+- Git 命令、usage 数据通过 `tokio::join!` 并发获取
+- 全平台静态二进制（Linux musl，Windows static CRT）
 
 ## 支持平台
 
-| 平台 | 架构 | 二进制文件 |
-|------|------|-----------|
+| 平台 | 架构 | 二进制 |
+|------|------|--------|
 | macOS | Apple Silicon (arm64) | `claude-lifeline-aarch64-apple-darwin` |
 | macOS | Intel (x86_64) | `claude-lifeline-x86_64-apple-darwin` |
-| Linux | x86_64 | `claude-lifeline-x86_64-unknown-linux-musl`（静态链接） |
-| Linux | ARM64 | `claude-lifeline-aarch64-unknown-linux-musl`（静态链接） |
+| Linux | x86_64 | `claude-lifeline-x86_64-unknown-linux-musl`（静态） |
+| Linux | ARM64 | `claude-lifeline-aarch64-unknown-linux-musl`（静态） |
 | Windows | x86_64 | `claude-lifeline-x86_64-pc-windows-msvc.exe`（静态 CRT） |
 
-## 更新日志
+## Changelog
 
-详见 [CHANGELOG.md](CHANGELOG.md)。
+见 [CHANGELOG.md](CHANGELOG.md)。
 
-## 许可证
+## License
 
-MIT — 详见 [LICENSE](../LICENSE)。
+MIT —— 见 [LICENSE](../LICENSE)。
