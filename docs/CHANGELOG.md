@@ -4,6 +4,62 @@ All notable changes to claude-lifeline will be documented in this file.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-05-14
+
+### Security
+- **Bump `rustls-webpki` to 0.103.13** — addresses RUSTSEC-2026-0104
+  (reachable panic in certificate revocation list parsing). The previous
+  0.103.12 transitively pulled in by `reqwest → rustls` could be made to
+  panic on a maliciously crafted certificate chain encountered during
+  TLS handshake to either the Anthropic usage API or GitHub release
+  endpoint.
+- **stdin read now bounded to 1 MiB** — `input::read_stdin` previously
+  used `read_to_string` without a size limit, so a malformed or
+  malicious CC hook payload could OOM the statusline process. Real CC
+  hook payloads run <10 KiB.
+- **`OAuthCredential` Debug now redacts `access_token`** — replaces
+  derived `Debug` with a custom impl that prints `[REDACTED]` for the
+  token field. Prevents accidental leak through `{:?}` formatting,
+  panic backtraces, or `anyhow` error context.
+- **Update-hint version string is sanitized + length-capped (20 chars)**
+  before rendering. The previous path inserted `tag_name` straight from
+  GitHub (or a locally-writable `update-cache.json`) into ANSI output,
+  enabling escape-sequence injection if either source was tampered with.
+- **Local file reads now bounded** — `auth.rs`/`config.rs` cap at
+  64 KiB / 128 KiB respectively; `usage::read_cache` uses
+  `tokio::fs::File::take(128 KiB)`. Prevents symlink-to-`/dev/zero` and
+  similar resource-exhaustion attacks against credential / config /
+  cache paths.
+
+### Fixed
+- **`git` commands no longer run in the spawn process's cwd when stdin
+  has no cwd field** — previously `unwrap_or_default()` produced `""`,
+  and `Command::current_dir("")` inherits the calling process's cwd
+  (the CC hook subprocess location, not the user's project). `git`
+  is now passed `Option<&str>` and short-circuits to `GitInfo::default()`
+  when cwd is `None` or empty.
+- **Usage cache no longer flushes all windows when any single
+  `resets_at` expires** — previously `is_cache_fresh` returned `false`
+  the moment any of `five_hour` / `seven_day` / `seven_day_sonnet`
+  passed their reset timestamp, forcing an API round-trip even though
+  the other two windows were still valid. Per-window staleness is now
+  filtered inside `cached_to_usage`, and the cache-level check only
+  considers the overall 5-minute TTL.
+- **`usage::write_cache` and `usage::read_cache` no longer use `std::fs`
+  inside async contexts** — switched to `tokio::fs` to avoid blocking
+  the reactor thread under the 30 ms statusline budget.
+
+### Removed
+- **Cache hit / TTL countdown segment** — the independent cache block
+  (hit% + predicted remaining lifetime, plus `expired` flash) has been
+  removed along with `src/cache_ttl.rs` and `src/ttl_samples.rs`. In
+  practice the signal was rarely actionable: the 5-minute TTL is an
+  Anthropic convention not surfaced via API, hit-rate fluctuated mostly
+  with prompt size rather than user-visible behaviour, and the
+  `expired` flash carried no recoverable action. The `display.cache_hit`
+  config key is gone — leftover entries in `config.toml` are silently
+  ignored by TOML extra-key tolerance.
+
 ## [0.1.0] - 2026-05-13
 
 ### Added

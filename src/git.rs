@@ -12,8 +12,13 @@ pub struct GitInfo {
     pub behind: u32,
 }
 
-/// 异步获取 git branch + dirty 状态，500ms 超时后返回默认值
-pub async fn get_git_info(cwd: &str) -> GitInfo {
+/// 异步获取 git branch + dirty 状态，500ms 超时后返回默认值。
+/// cwd=None 或空字符串时直接返回默认 —— 否则 `Command::current_dir("")`
+/// 会继承 CC hook 子进程的工作目录（不是用户项目目录），显示错误的 git 状态
+pub async fn get_git_info(cwd: Option<&str>) -> GitInfo {
+    let Some(cwd) = cwd.filter(|s| !s.is_empty()) else {
+        return GitInfo::default();
+    };
     let deadline = Duration::from_millis(500);
 
     let branch_fut = Command::new("git")

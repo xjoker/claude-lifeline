@@ -64,12 +64,18 @@ pub struct RateLimitWindow {
 
 // ── 公共函数 ──
 
-/// 从 stdin 读取并解析 JSON
+/// 从 stdin 读取并解析 JSON。限制 1 MiB —— CC hook payload 实测 <10 KiB，
+/// 设上限防止 stdin 端异常或恶意大数据导致 statusline 进程 OOM
+const STDIN_MAX_BYTES: u64 = 1_048_576;
+
 pub async fn read_stdin() -> anyhow::Result<StdinData> {
     use tokio::io::AsyncReadExt;
 
     let mut buf = String::new();
-    tokio::io::stdin().read_to_string(&mut buf).await?;
+    tokio::io::stdin()
+        .take(STDIN_MAX_BYTES)
+        .read_to_string(&mut buf)
+        .await?;
     let data: StdinData = serde_json::from_str(&buf)?;
     Ok(data)
 }

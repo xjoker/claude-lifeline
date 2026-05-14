@@ -1,10 +1,8 @@
 mod auth;
-mod cache_ttl;
 mod config;
 mod git;
 mod input;
 mod render;
-mod ttl_samples;
 mod update;
 mod usage;
 
@@ -32,21 +30,20 @@ async fn run() -> anyhow::Result<()> {
     // 1. 读 stdin JSON
     let stdin = crate::input::read_stdin().await?;
 
-    // 2. 获取 cwd 用于 git
+    // 2. 获取 cwd 用于 git（空则跳过 git，避免在 CC hook 子进程的 cwd 上跑）
     let cwd = stdin
         .cwd
-        .clone()
+        .as_deref()
         .or_else(|| {
             stdin
                 .workspace
                 .as_ref()
-                .and_then(|w| w.current_dir.clone())
-        })
-        .unwrap_or_default();
+                .and_then(|w| w.current_dir.as_deref())
+        });
 
     // 3. 并发：git info + usage data
     let (git, usage) = tokio::join!(
-        crate::git::get_git_info(&cwd),
+        crate::git::get_git_info(cwd),
         crate::usage::get_usage_data(stdin.rate_limits.as_ref()),
     );
 

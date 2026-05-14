@@ -55,7 +55,13 @@ pub fn check_update_hint() -> Option<String> {
 
     // 比较版本（按 SemVer 元组比较，避免 lex 比较把 0.0.10 当成早于 0.0.4）
     if version_gt(&cache.latest_version, CURRENT_VERSION) {
-        Some(cache.latest_version)
+        // sanitize + 截断：cache 文件被本地写入或 MITM GitHub 时，tag_name 可能
+        // 含 ESC 控制符或异常长度，未过滤会注入 ANSI 转义污染状态栏
+        let cleaned: String = crate::input::sanitize_external(&cache.latest_version)
+            .chars()
+            .take(20)
+            .collect();
+        if cleaned.is_empty() { None } else { Some(cleaned) }
     } else {
         None
     }

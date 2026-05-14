@@ -99,10 +99,6 @@ pub struct DisplayConfig {
     /// 显示代码改动量 +X -Y（仅当本 session 有增删时）
     #[serde(default = "yes")]
     pub edit_stats: bool,
-    /// 显示独立 cache 段（命中率 + TTL 倒计时）
-    /// 颜色规则：expired 窗口 → 红；命中率 <30% → 黄；正常 → 青
-    #[serde(default = "yes")]
-    pub cache_hit: bool,
 }
 
 fn yes() -> bool { true }
@@ -114,7 +110,6 @@ impl Default for DisplayConfig {
             five_hour: true,
             seven_day: true,
             edit_stats: true,
-            cache_hit: true,
         }
     }
 }
@@ -129,10 +124,18 @@ pub fn read_config() -> Config {
         .join("claude-lifeline")
         .join("config.toml");
 
-    let mut cfg: Config = std::fs::read_to_string(path)
-        .ok()
+    // 限制 128 KiB：防 symlink 到大文件吞内存（真实配置实测 <2 KiB）
+    let mut cfg: Config = read_capped(&path, 128 * 1024)
         .and_then(|s| toml::from_str(&s).ok())
         .unwrap_or_default();
     cfg.thresholds = cfg.thresholds.sanitize();
     cfg
+}
+
+fn read_capped(path: &std::path::Path, max_bytes: u64) -> Option<String> {
+    use std::io::Read;
+    let mut f = std::fs::File::open(path).ok()?;
+    let mut buf = String::new();
+    f.by_ref().take(max_bytes).read_to_string(&mut buf).ok()?;
+    Some(buf)
 }

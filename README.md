@@ -26,13 +26,12 @@ claude-lifeline adds **pace intelligence**: it compares your actual consumption 
 - **Depletion ETA `→HH:MM`** — predicts the local time your quota hits 100% at the current burn rate (only shown when over-pace)
 - **Recovery wait `↓Xh`** — tells you how long to pause so your pace catches up
 - **Sonnet sub-quota alert** — when Sonnet-specific usage outruns pace, an extra `S:U/P%!` block appears next to the regular 7d block (hidden otherwise)
-- **Cache TTL countdown** — separate cache segment shows hit rate and predicted prompt-cache expiry, turns red when the cache has actually died
 
 ### Also included
 
 - Git branch, dirty status, ahead/behind upstream
 - Session edit stats (`+lines_added` / `-lines_removed`)
-- Configurable segments — toggle context, 5h quota, 7d quota, cache, edit stats on/off via TOML
+- Configurable segments — toggle context, 5h quota, 7d quota, edit stats on/off via TOML
 - **~30ms** response, **~3MB** binary, zero runtime dependencies (static on Linux/Windows, signed on macOS)
 
 ## Install
@@ -55,7 +54,7 @@ Share this repo URL with Claude Code — it will read the instructions below and
 >    ```json
 >    "statusLine": { "type": "command", "command": "~/.claude/bin/claude-lifeline", "refreshInterval": 15 }
 >    ```
->    Do NOT overwrite the entire file — preserve all existing settings. `refreshInterval: 15` keeps the cache TTL countdown and quota ETA close to live. If the user already has a custom `refreshInterval`, leave it untouched.
+>    Do NOT overwrite the entire file — preserve all existing settings. `refreshInterval: 15` keeps the quota ETA close to live. If the user already has a custom `refreshInterval`, leave it untouched.
 > 4. Tell the user to restart Claude Code to activate the new status line.
 
 ### Manual install
@@ -138,9 +137,9 @@ curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/insta
 A compact single-line bar with everything inline as colored blocks.
 
 ```
- Opus 4.7 1M  claude-lifeline  master  +95 -442  ctx 21%  100% 3m19s  3/28%  63/68%  S:87/68%! →5/13 16:08 ↓1d8h
- ^^^^^^^^^^^  ^^^^^^^^^^^^^^^  ^^^^^^  ^^^^^^^^  ^^^^^^^  ^^^^^^^^^^  ^^^^^  ^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^^
- Model        Project          Git     Edits     Context  Cache       5h     7d      Sonnet 7d (over-pace only)
+ Opus 4.7 1M  claude-lifeline  master  +95 -442  ctx 21%  3/28%  63/68%  S:87/68%! →5/13 16:08 ↓1d8h
+ ^^^^^^^^^^^  ^^^^^^^^^^^^^^^  ^^^^^^  ^^^^^^^^  ^^^^^^^  ^^^^^  ^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Model        Project          Git     Edits     Context  5h     7d      Sonnet 7d (over-pace only)
 ```
 
 ### Block breakdown
@@ -152,7 +151,6 @@ A compact single-line bar with everything inline as colored blocks.
 | Git | `branch[*][ ↑N][ ↓N]` — branch name truncated to 16 cols | Warm orange |
 | Edits | `+lines_added -lines_removed` from Claude Code's session counter | Neutral gray |
 | Context | `ctx N%` | **Green / Yellow / Red** by threshold |
-| Cache | `hit% remaining` (e.g., `100% 3m19s`); `expired` when cache has died | **Blue / Yellow / Red** |
 | 5h / 7d quota | `U/P%` (e.g., `3/28%`); over-pace adds `!`, depletion ETA, recovery wait | **Blue / Yellow / Red** by threshold + over-pace |
 | Sonnet 7d | `S:U/P%!` — only appears when Sonnet usage exceeds pace | Yellow / Red |
 
@@ -214,22 +212,12 @@ When Sonnet has its own quota cap (some Max plans), `seven_day_sonnet` from the 
 └─ Overall 7d at 63% (within pace, normal blue)
 ```
 
-### Cache segment
-
-```
-100% 3m19s     # alive, normal — blue background, hit rate + estimated remaining TTL
-30%  4m12s     # alive but low hit rate — yellow (cache rebuild in progress)
-expired        # cache just died (60s after detected real TTL expiry) — red
-```
-
-Hit rate is `cache_read / (input + cache_read + cache_creation)` from the most recent API turn. Remaining time is predicted as `last_active + 5min` (Anthropic exposes no server-side cache state API). Disappears when there's no usable signal.
-
 ### Width-aware wrapping
 
 The bar auto-adapts to the terminal width:
 
 - **Wide enough** → all blocks on one line
-- **Narrow** → splits into two lines: `model + project + git + edits` on line 1, `ctx + cache + 5h + 7d + sonnet` on line 2
+- **Narrow** → splits into two lines: `model + project + git + edits` on line 1, `ctx + 5h + 7d + sonnet` on line 2
 - **Very narrow** → one block per line
 
 The 1-column gap between blocks ensures adjacent same-color segments stay distinguishable without separator characters.
@@ -243,7 +231,6 @@ Optional config file at `~/.claude/claude-lifeline/config.toml`.
 ```toml
 [display]
 context    = true   # Context window block
-cache_hit  = true   # Cache hit rate + TTL block
 five_hour  = true   # 5-hour quota block
 seven_day  = true   # 7-day quota block (also gates Sonnet sub-quota block)
 edit_stats = true   # +lines_added / -lines_removed from Claude Code's session counter

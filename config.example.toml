@@ -7,11 +7,6 @@ context    = true   # context window 块
 five_hour  = true   # 5h quota 块
 seven_day  = true   # 7d quota 块（同时控制 Sonnet 子块——超速时才显示）
 edit_stats = true   # 代码改动量 +X -Y（仅当 session 有增删时渲染）
-cache_hit  = true   # 缓存命中率 + TTL 倒计时块
-                    # 颜色：expired→红 / 命中率<30%→黄 / 否则→蓝
-                    # 命中率：cache_read / 总输入 token（仅最近一次 API 调用）
-                    # 倒计时：last_observed_hit + 5min - now，预估 cache 还能活多久
-                    # current_usage 为 null（首条/compact 后）或 cache 已死时不显示
 
 # 颜色切换阈值（可选；缺省使用下列默认值）
 # 校验规则：yellow 必须 < red，且都在 [0, 100]；不合法时该对回退默认

@@ -116,31 +116,26 @@ pub async fn get_usage_data(rate_limits: Option<&RateLimits>) -> UsageData {
 
         let has_data = five_hour.is_some() || seven_day.is_some();
         if has_data {
-            // rate_limits 无 per-model 字段，保留缓存里已有的 sonnet 数据
+            // rate_limits 无 per-model 字段，保留缓存里已有的 sonnet 数据。
+            // sonnet 窗口的有效性单独判定 —— 不能因 5h 窗口刚 reset 就丢掉仍然新鲜的 sonnet
             let seven_day_sonnet = read_cache()
                 .await
-                .filter(is_cache_fresh)
-                .and_then(|c| c.data.seven_day_sonnet_pct.map(|pct| WindowUsage {
-                    used_percent: pct,
-                    resets_at: c.data.seven_day_sonnet_resets_at
-                        .as_deref()
-                        .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
-                        .map(|dt| dt.with_timezone(&Utc)),
-                }));
+                .filter(cache_within_ttl)
+                .and_then(|c| sonnet_from_cache(&c.data));
             let usage = UsageData {
                 five_hour,
                 seven_day,
                 seven_day_sonnet,
             };
-            // 同步写入缓存（fs::write，亚毫秒级，不阻塞渲染）
-            write_cache(&usage);
+            write_cache(&usage).await;
             return usage;
         }
     }
 
-    // 优先级 2: 缓存文件
+    // 优先级 2: 缓存文件 —— 仅看 cache 整体 TTL；每个窗口的 resets_at 在
+    // cached_to_usage 内部独立过滤，避免一个窗口刚 reset 拖累其他窗口
     if let Some(cache) = read_cache().await {
-        if is_cache_fresh(&cache) {
+        if cache_within_ttl(&cache) {
             let usage = cached_to_usage(&cache.data);
             return usage;
         }
@@ -148,7 +143,7 @@ pub async fn get_usage_data(rate_limits: Option<&RateLimits>) -> UsageData {
 
     // 优先级 3: API fallback
     if let Some(usage) = fetch_usage_from_api().await {
-        write_cache(&usage);
+        write_cache(&usage).await;
         return usage;
     }
 
@@ -227,19 +222,21 @@ fn cache_path() -> std::path::PathBuf {
         .join("usage-cache.json")
 }
 
-/// 读取缓存文件（async，避免阻塞 tokio reactor）
+/// 读取缓存文件（async，限制 128 KiB 防 symlink 攻击）
 async fn read_cache() -> Option<CacheFile> {
+    use tokio::io::AsyncReadExt;
     let path = cache_path();
-    let content = tokio::fs::read_to_string(path).await.ok()?;
-    serde_json::from_str(&content).ok()
+    let file = tokio::fs::File::open(path).await.ok()?;
+    let mut buf = String::new();
+    file.take(128 * 1024).read_to_string(&mut buf).await.ok()?;
+    serde_json::from_str(&buf).ok()
 }
 
-/// 写入缓存文件
-fn write_cache(data: &UsageData) {
+/// 写入缓存文件（async tokio::fs，避免阻塞 reactor 线程）
+async fn write_cache(data: &UsageData) {
     let path = cache_path();
-    // 创建目录
     if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+        let _ = tokio::fs::create_dir_all(parent).await;
     }
 
     let cached = CachedUsage {
@@ -266,65 +263,51 @@ fn write_cache(data: &UsageData) {
     };
 
     if let Ok(json) = serde_json::to_string(&cache_file) {
-        let _ = std::fs::write(path, json);
+        let _ = tokio::fs::write(path, json).await;
     }
 }
 
-/// 检查缓存是否在 TTL 内且 resets_at 未过期
-fn is_cache_fresh(cache: &CacheFile) -> bool {
+/// cache 是否在整体 TTL 内（不再做"任一窗口 reset 就整个失效"的激进判定 ——
+/// 单个窗口的 resets_at 在 cached_to_usage 内部独立过滤）
+fn cache_within_ttl(cache: &CacheFile) -> bool {
     let now = Utc::now().timestamp();
-    if now - cache.timestamp >= CACHE_TTL_SUCCESS {
-        return false;
-    }
-    // resets_at 已过期则缓存无效（窗口已重置）
-    let now_dt = Utc::now();
-    for resets_at_str in [
-        &cache.data.five_hour_resets_at,
-        &cache.data.seven_day_resets_at,
-        &cache.data.seven_day_sonnet_resets_at,
-    ].into_iter().flatten() {
-        if let Ok(dt) = DateTime::parse_from_rfc3339(resets_at_str) {
-            if dt.with_timezone(&Utc) < now_dt {
-                return false;
-            }
+    now - cache.timestamp < CACHE_TTL_SUCCESS
+}
+
+/// 把单个窗口的 (pct, resets_at_str) 转 WindowUsage，过滤已过期窗口
+fn window_from_cache(pct: Option<f64>, resets_at: Option<&str>) -> Option<WindowUsage> {
+    let pct = pct?;
+    let resets_at = resets_at
+        .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+        .map(|dt| dt.with_timezone(&Utc));
+    // resets_at 已过期 → 该窗口刚 reset，旧数据无意义
+    if let Some(ts) = resets_at {
+        if ts < Utc::now() {
+            return None;
         }
     }
-    true
+    Some(WindowUsage { used_percent: pct, resets_at })
+}
+
+fn sonnet_from_cache(cached: &CachedUsage) -> Option<WindowUsage> {
+    window_from_cache(
+        cached.seven_day_sonnet_pct,
+        cached.seven_day_sonnet_resets_at.as_deref(),
+    )
 }
 
 /// 从 CachedUsage 转换为 UsageData
 fn cached_to_usage(cached: &CachedUsage) -> UsageData {
-    let five_hour = cached.five_hour_pct.map(|pct| WindowUsage {
-        used_percent: pct,
-        resets_at: cached
-            .five_hour_resets_at
-            .as_deref()
-            .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
-            .map(|dt| dt.with_timezone(&Utc)),
-    });
-
-    let seven_day = cached.seven_day_pct.map(|pct| WindowUsage {
-        used_percent: pct,
-        resets_at: cached
-            .seven_day_resets_at
-            .as_deref()
-            .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
-            .map(|dt| dt.with_timezone(&Utc)),
-    });
-
-    let seven_day_sonnet = cached.seven_day_sonnet_pct.map(|pct| WindowUsage {
-        used_percent: pct,
-        resets_at: cached
-            .seven_day_sonnet_resets_at
-            .as_deref()
-            .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
-            .map(|dt| dt.with_timezone(&Utc)),
-    });
-
     UsageData {
-        five_hour,
-        seven_day,
-        seven_day_sonnet,
+        five_hour: window_from_cache(
+            cached.five_hour_pct,
+            cached.five_hour_resets_at.as_deref(),
+        ),
+        seven_day: window_from_cache(
+            cached.seven_day_pct,
+            cached.seven_day_resets_at.as_deref(),
+        ),
+        seven_day_sonnet: sonnet_from_cache(cached),
     }
 }
 

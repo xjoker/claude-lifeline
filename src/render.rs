@@ -227,8 +227,6 @@ fn ctx_block_colors(pct: f64, t: &Thresholds) -> (u8, u8) {
     }
 }
 
-const CACHE_LOW_HIT_PCT: f64 = 30.0;
-
 /// quota 色块底色（阈值来自配置；5h / 7d 独立）
 fn quota_block_colors(pct: f64, over: bool, yellow_at: f64, red_at: f64) -> (u8, u8) {
     if pct >= red_at {
@@ -238,25 +236,6 @@ fn quota_block_colors(pct: f64, over: bool, yellow_at: f64, red_at: f64) -> (u8,
     } else {
         (BG_QUOTA_SAFE, FG_DARK)
     }
-}
-
-/// cache mini 块：5h/7d 同款 — 无文字 label，靠颜色和位置（紧跟 ctx 之后）区分
-///   expired 窗口    → 红底 "expired"
-///   alive + 低命中  → 黄底 "{hit}% {remaining}"
-///   alive + 正常    → 蓝底 "{hit}% {remaining}"
-///   其他            → None（不渲染）
-fn cache_mini_block(state: &crate::cache_ttl::CacheLiveState) -> Option<(u8, String)> {
-    if crate::cache_ttl::within_expired_window(state) {
-        return Some((BG_DANGER, "expired".to_string()));
-    }
-    if !state.alive {
-        return None;
-    }
-    let hit = state.hit_percent.unwrap_or(0.0);
-    let remaining = crate::cache_ttl::format_remaining(state.remaining_secs);
-    let text = format!("{hit:.0}% {remaining}");
-    let bg = if hit < CACHE_LOW_HIT_PCT { BG_WARN } else { BG_QUOTA_SAFE };
-    Some((bg, text))
 }
 
 /// quota 色块（5h / 7d）：极简格式
@@ -394,16 +373,6 @@ fn render_mini(ctx: &RenderContext) {
         let ctx_pct = crate::input::get_context_percent(&ctx.stdin);
         let (bg, fg) = ctx_block_colors(ctx_pct, t);
         metrics.push(block(bg, fg, &format!("ctx {ctx_pct:.0}%")));
-    }
-
-    // cache（独立块）：5h/7d 风格——无 label，靠颜色区分异常
-    //   expired → 红底；命中率过低 → 黄底；正常 → 蓝底
-    if ctx.config.display.cache_hit {
-        if let Some(s) = crate::cache_ttl::check_and_update(&ctx.stdin) {
-            if let Some((bg, text)) = cache_mini_block(&s) {
-                metrics.push(block(bg, FG_DARK, &text));
-            }
-        }
     }
 
     // 5h

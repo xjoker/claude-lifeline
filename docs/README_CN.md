@@ -26,13 +26,12 @@ claude-lifeline 加入**配速智能**：把实际消耗速率和每个配额窗
 - **耗尽时间 ETA `→HH:MM`**——按当前烧速预测多久打到 100%（仅超速时显示）
 - **恢复等待 `↓Xh`**——告诉你停多久配速能追上当前用量
 - **Sonnet 子配额告警**——当 Sonnet 专属用量超速时，在 7d 块旁追加一个 `S:U/P%!` 块（否则隐藏）
-- **缓存 TTL 倒计时**——独立 cache 段显示命中率和预测的 prompt 缓存剩余时间，缓存死掉变红
 
 ### 其他功能
 
 - Git 分支、dirty 状态、ahead/behind upstream
 - 会话编辑量（`+lines_added` / `-lines_removed`）
-- 段可配置——TOML 里开关 context / 5h / 7d / cache / edit stats
+- 段可配置——TOML 里开关 context / 5h / 7d / edit stats
 - **~30ms** 响应、**~3MB** 二进制、零运行时依赖（Linux/Windows 静态，macOS 签名）
 
 ## 安装
@@ -55,7 +54,7 @@ claude-lifeline 加入**配速智能**：把实际消耗速率和每个配额窗
 >    ```json
 >    "statusLine": { "type": "command", "command": "~/.claude/bin/claude-lifeline", "refreshInterval": 15 }
 >    ```
->    **不要**覆盖整个文件，保留其他设置。`refreshInterval: 15` 让 cache TTL 倒计时和 quota ETA 接近实时刷新。如果用户已有自定义 `refreshInterval`，保持不动。
+>    **不要**覆盖整个文件，保留其他设置。`refreshInterval: 15` 让 quota ETA 接近实时刷新。如果用户已有自定义 `refreshInterval`，保持不动。
 > 4. 告诉用户重启 Claude Code 激活新状态栏。
 
 ### 手动安装
@@ -138,9 +137,9 @@ curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/insta
 紧凑单行色块，全部信息内联。
 
 ```
- Opus 4.7 1M  claude-lifeline  master  +95 -442  ctx 21%  100% 3m19s  3/28%  63/68%  S:87/68%! →5/13 16:08 ↓1d8h
- ^^^^^^^^^^^  ^^^^^^^^^^^^^^^  ^^^^^^  ^^^^^^^^  ^^^^^^^  ^^^^^^^^^^  ^^^^^  ^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^^
- 模型         项目             Git     编辑量    Context  Cache       5h     7d      Sonnet 7d（仅超速时出现）
+ Opus 4.7 1M  claude-lifeline  master  +95 -442  ctx 21%  3/28%  63/68%  S:87/68%! →5/13 16:08 ↓1d8h
+ ^^^^^^^^^^^  ^^^^^^^^^^^^^^^  ^^^^^^  ^^^^^^^^  ^^^^^^^  ^^^^^  ^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^^
+ 模型         项目             Git     编辑量    Context  5h     7d      Sonnet 7d（仅超速时出现）
 ```
 
 ### 块说明
@@ -152,7 +151,6 @@ curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/insta
 | Git | `分支[*][ ↑N][ ↓N]`——分支名截断到 16 列 | 暖橙 |
 | 编辑量 | `+lines_added -lines_removed`，来自 Claude Code 会话计数器 | 中性灰 |
 | Context | `ctx N%` | **绿 / 黄 / 红** 阈值切换 |
-| Cache | `hit% 剩余时间`（如 `100% 3m19s`）；缓存死掉显示 `expired` | **蓝 / 黄 / 红** |
 | 5h / 7d quota | `U/P%`（如 `3/28%`）；超速追加 `!`、ETA、恢复等待 | **蓝 / 黄 / 红** 阈值 + 超速切换 |
 | Sonnet 7d | `S:U/P%!`——只在 Sonnet 用量超速时出现 | 黄 / 红 |
 
@@ -214,22 +212,12 @@ curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/insta
 └─ 7d 总量 63%（未超速，正常蓝）
 ```
 
-### Cache 段
-
-```
-100% 3m19s     # 活，命中率正常——蓝底，命中率 + 预估剩余 TTL
-30%  4m12s     # 活但命中率低——黄底（缓存重建中）
-expired        # 缓存刚死（检测到真过期后的 60s 窗口）——红底
-```
-
-命中率 = `cache_read / (input + cache_read + cache_creation)`，取自最近一次 API turn。剩余时间预测为 `last_active + 5min`（Anthropic 没暴露 server 端缓存状态 API）。没有可用信号时隐藏。
-
 ### 自适应宽度换行
 
 根据终端宽度自动调整：
 
 - **足够宽** → 全部块一行
-- **窄** → 拆两行：`model + project + git + edits` 一行，`ctx + cache + 5h + 7d + sonnet` 一行
+- **窄** → 拆两行：`model + project + git + edits` 一行，`ctx + 5h + 7d + sonnet` 一行
 - **极窄** → 每块一行
 
 块间 1 列空格保证相邻同色块仍可区分，无需分隔字符。
@@ -243,7 +231,6 @@ expired        # 缓存刚死（检测到真过期后的 60s 窗口）——红�
 ```toml
 [display]
 context    = true   # Context window 块
-cache_hit  = true   # 缓存命中率 + TTL 块
 five_hour  = true   # 5 小时 quota 块
 seven_day  = true   # 7 天 quota 块（同时控制 Sonnet 子块）
 edit_stats = true   # 来自 Claude Code 会话计数器的 +lines_added / -lines_removed
