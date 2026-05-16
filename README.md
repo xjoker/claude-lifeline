@@ -305,6 +305,12 @@ claude-lifeline update run        # Download and atomically replace the
 claude-lifeline doctor            # Diagnostic report: PATH, data dir,
                                   # credentials, transcript count, and
                                   # Claude Code statusLine integration
+
+claude-lifeline watch [SESSION]   # tail -f a transcript JSONL; pretty-
+                                  # prints user / assistant / tool_use /
+                                  # tool_result events with timestamps.
+                                  # Omit SESSION to follow the most
+                                  # recently modified transcript.
 ```
 
 The TUI scans `~/.claude/projects/**/*.jsonl` on each refresh — no shared

@@ -9,6 +9,7 @@ mod render;
 mod tui;
 mod update;
 mod usage;
+mod watch;
 
 use clap::Parser;
 

@@ -35,6 +35,12 @@ pub enum Commands {
     },
     /// Diagnose installation & Claude Code integration
     Doctor,
+    /// Tail a transcript JSONL and pretty-print new messages as they arrive
+    Watch {
+        /// session_id to follow (file stem under ~/.claude/projects/.../*.jsonl).
+        /// Omit to follow the transcript with the most recent modification.
+        session_id: Option<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -72,6 +78,7 @@ pub async fn dispatch(cli: Cli) -> anyhow::Result<()> {
             crate::update::cli::run(action.unwrap_or(UpdateAction::Check)).await
         }
         Some(Commands::Doctor) => crate::doctor::run().await,
+        Some(Commands::Watch { session_id }) => crate::watch::run(session_id).await,
     }
 }
 

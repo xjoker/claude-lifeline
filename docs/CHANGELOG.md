@@ -53,6 +53,14 @@ without modification.
   the file entirely (kept for backwards compatibility with pre-0.4.0
   releases).
 
+### Added (post-skeleton)
+- **`claude-lifeline watch [session_id]`** — `tail -f`-style live view
+  of a single transcript. Pretty-prints user / assistant / tool_use /
+  tool_result entries with per-event timestamps and the running token
+  counter. Omitting `session_id` follows the most recently modified
+  transcript across `~/.claude/projects/`. Uses a 250 ms polling loop —
+  no `notify` dependency.
+
 ### Notes
 - The legacy hidden flag `--check-update` is preserved for the
   background self-spawn used by the statusline path.
@@ -60,6 +68,9 @@ without modification.
   caching a "current session" file shared across terminals — that
   pattern has been observed to silently overwrite state when multiple
   Claude Code windows are open.
+- Binary size on macOS arm64 (release, LTO, strip): **3.82 MB** —
+  +1.8 MB over 0.3.0. The increase is dominated by `ratatui` +
+  `crossterm` + `clap`. Statusline cold-start latency unchanged.
 
 ## [0.3.0] - 2026-05-16
 
