@@ -27,11 +27,19 @@ claude-lifeline 加入**配速智能**：把实际消耗速率和每个配额窗
 - **恢复等待 `↓Xh`**——告诉你停多久配速能追上当前用量
 - **Sonnet 子配额告警**——当 Sonnet 专属用量超速时，在 7d 块旁追加一个 `S:U/P%!` 块（否则隐藏）
 
+### 可选块（默认关闭）
+
+在 `~/.claude/claude-lifeline/config.toml` 主动开启：
+
+- **订阅徽章**（`display.subscription`）——从 OAuth 凭证解析订阅档位，如 `MAX·20x`、`MAX·5x`、`PRO`、`FREE`
+- **Opus 7d 子配额**（`display.seven_day_opus`）——类比 Sonnet 子块，仅在 Opus 用量超速时显示 `O:U/P%!`
+- **付费扩容池**（`display.extra_usage`）——展示月度付费扩容余额：`$5.4K/20K 27%`（USD）或 `[XYZ] used/limit pct%`；账户未开通扩容时自动隐藏
+
 ### 其他功能
 
 - Git 分支、dirty 状态、ahead/behind upstream
 - 会话编辑量（`+lines_added` / `-lines_removed`）
-- 段可配置——TOML 里开关 context / 5h / 7d / edit stats
+- 段可配置——TOML 里开关 context / 5h / 7d / edit stats，以及上面三个可选段
 - **~30ms** 响应、**~3MB** 二进制、零运行时依赖（Linux/Windows 静态，macOS 签名）
 
 ## 安装
@@ -153,6 +161,9 @@ curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/insta
 | Context | `ctx N%` | **绿 / 黄 / 红** 阈值切换 |
 | 5h / 7d quota | `U/P%`（如 `3/28%`）；超速追加 `!`、ETA、恢复等待 | **蓝 / 黄 / 红** 阈值 + 超速切换 |
 | Sonnet 7d | `S:U/P%!`——只在 Sonnet 用量超速时出现 | 黄 / 红 |
+| 订阅 *（可选）* | `MAX·20x` / `MAX·5x` / `PRO` / `FREE` ——从 OAuth 凭证解析 | 紫灰（256 #60） |
+| Opus 7d *（可选）* | `O:U/P%!` ——只在 Opus 用量超速时出现 | 黄 / 红 |
+| 扩容池 *（可选）* | `$5.4K/20K 27%`（USD）或 `[XYZ] used/limit pct%` ——月度付费余额 | **蓝 / 黄 / 红** 按利用率走 7d 阈值 |
 
 ### 模型强度配色
 
@@ -230,10 +241,15 @@ curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/insta
 
 ```toml
 [display]
-context    = true   # Context window 块
-five_hour  = true   # 5 小时 quota 块
-seven_day  = true   # 7 天 quota 块（同时控制 Sonnet 子块）
-edit_stats = true   # 来自 Claude Code 会话计数器的 +lines_added / -lines_removed
+context        = true   # Context window 块
+five_hour      = true   # 5 小时 quota 块
+seven_day      = true   # 7 天 quota 块（同时控制 Sonnet 子块）
+edit_stats     = true   # 来自 Claude Code 会话计数器的 +lines_added / -lines_removed
+
+# 可选块——默认全部关闭，避免升级后 UI 静默变化
+subscription   = false  # 从 OAuth 凭证显示订阅徽章（如 MAX·20x / PRO）
+seven_day_opus = false  # Opus 7d 子配额（`O:U/P%!`，仅超速时出现）
+extra_usage    = false  # 月度付费扩容池（账户未开通时自动隐藏）
 
 # 颜色阈值（可选——下方为默认值）
 # 校验：每个 yellow_at 必须 < red_at 且在 [0, 100]；
@@ -265,7 +281,7 @@ Rate limit 数据按优先级解析：
 |--------|------|------|
 | 1 | `stdin.rate_limits` | Claude Code ≥ 2.1.80，无需 auth；只提供 `five_hour` + `seven_day` |
 | 2 | 本地缓存 | `~/.claude/claude-lifeline/usage-cache.json`，5min TTL；rate_limits 写入时保留 Sonnet 数据 |
-| 3 | API fallback | `api.anthropic.com/api/oauth/usage`，2s 超时；提供 Sonnet 子配额 |
+| 3 | API fallback | `api.anthropic.com/api/oauth/usage`，2s 超时；提供 Sonnet/Opus 子配额及付费扩容池 |
 | 4 | 空 | quota 段不显示 |
 
 ### 凭证
@@ -274,6 +290,8 @@ API fallback 用的 OAuth token 读取来源：
 
 1. `~/.claude/.credentials.json`（Linux / Windows / 老版 macOS）
 2. **macOS Keychain** —— `security find-generic-password -s "Claude Code-credentials"` 兜底，覆盖 Claude.app 不写凭证文件的情况
+
+同一来源也提供 `subscriptionType`（如 `max` / `pro`）和 `rateLimitTier`（如 `default_claude_max_20x`），可选订阅徽章直接读取，无需额外 API 调用。
 
 ## 性能
 

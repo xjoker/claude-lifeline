@@ -27,11 +27,19 @@ claude-lifeline adds **pace intelligence**: it compares your actual consumption 
 - **Recovery wait `↓Xh`** — tells you how long to pause so your pace catches up
 - **Sonnet sub-quota alert** — when Sonnet-specific usage outruns pace, an extra `S:U/P%!` block appears next to the regular 7d block (hidden otherwise)
 
+### Optional segments (off by default)
+
+Opt-in via `~/.claude/claude-lifeline/config.toml`:
+
+- **Subscription badge** (`display.subscription`) — shows the plan parsed from OAuth credentials, e.g. `MAX·20x`, `MAX·5x`, `PRO`, `FREE`
+- **Opus 7d sub-quota** (`display.seven_day_opus`) — mirrors the Sonnet sub-quota for Opus; shown as `O:U/P%!` only when over-pace
+- **Extra-usage credit pool** (`display.extra_usage`) — surfaces the monthly paid top-up balance as `$5.4K/20K 27%` (USD) or `[XYZ] used/limit pct%` for other currencies; auto-hidden when the pool is not enabled on your account
+
 ### Also included
 
 - Git branch, dirty status, ahead/behind upstream
 - Session edit stats (`+lines_added` / `-lines_removed`)
-- Configurable segments — toggle context, 5h quota, 7d quota, edit stats on/off via TOML
+- Configurable segments — toggle context, 5h quota, 7d quota, edit stats, plus the optional segments above via TOML
 - **~30ms** response, **~3MB** binary, zero runtime dependencies (static on Linux/Windows, signed on macOS)
 
 ## Install
@@ -153,6 +161,9 @@ A compact single-line bar with everything inline as colored blocks.
 | Context | `ctx N%` | **Green / Yellow / Red** by threshold |
 | 5h / 7d quota | `U/P%` (e.g., `3/28%`); over-pace adds `!`, depletion ETA, recovery wait | **Blue / Yellow / Red** by threshold + over-pace |
 | Sonnet 7d | `S:U/P%!` — only appears when Sonnet usage exceeds pace | Yellow / Red |
+| Subscription *(opt-in)* | `MAX·20x` / `MAX·5x` / `PRO` / `FREE` — plan parsed from OAuth credentials | Desaturated purple (256 #60) |
+| Opus 7d *(opt-in)* | `O:U/P%!` — only appears when Opus usage exceeds pace | Yellow / Red |
+| Extra-usage *(opt-in)* | `$5.4K/20K 27%` (USD) or `[XYZ] used/limit pct%` for the monthly paid pool | **Blue / Yellow / Red** by utilization vs 7d thresholds |
 
 ### Model intensity colors
 
@@ -230,10 +241,15 @@ Optional config file at `~/.claude/claude-lifeline/config.toml`.
 
 ```toml
 [display]
-context    = true   # Context window block
-five_hour  = true   # 5-hour quota block
-seven_day  = true   # 7-day quota block (also gates Sonnet sub-quota block)
-edit_stats = true   # +lines_added / -lines_removed from Claude Code's session counter
+context        = true   # Context window block
+five_hour      = true   # 5-hour quota block
+seven_day      = true   # 7-day quota block (also gates Sonnet sub-quota block)
+edit_stats     = true   # +lines_added / -lines_removed from Claude Code's session counter
+
+# Optional segments — all default OFF so upgrades don't change your UI silently
+subscription   = false  # Plan badge from OAuth credentials (e.g. MAX·20x, PRO)
+seven_day_opus = false  # Opus 7d sub-quota (`O:U/P%!`, over-pace only)
+extra_usage    = false  # Monthly paid credit pool (auto-hidden if pool is not enabled)
 
 # Color thresholds (optional — defaults shown below)
 # Validation: each yellow_at must be < red_at and within [0, 100];
@@ -267,7 +283,7 @@ Rate limit data is resolved in priority order:
 |----------|--------|-------|
 | 1 | `stdin.rate_limits` | Claude Code ≥ 2.1.80, no auth needed; provides `five_hour` + `seven_day` only |
 | 2 | Local cache | `~/.claude/claude-lifeline/usage-cache.json`, 5min TTL; preserves Sonnet data across rate_limits writes |
-| 3 | API fallback | `api.anthropic.com/api/oauth/usage`, 2s timeout; provides Sonnet sub-quota |
+| 3 | API fallback | `api.anthropic.com/api/oauth/usage`, 2s timeout; provides Sonnet/Opus sub-quotas and the extra-usage credit pool |
 | 4 | Empty | Quota segments not displayed |
 
 ### Credentials
@@ -276,6 +292,8 @@ For the API fallback, OAuth token is read from:
 
 1. `~/.claude/.credentials.json` (Linux / Windows / older macOS)
 2. **macOS Keychain** — `security find-generic-password -s "Claude Code-credentials"` fallback for Claude.app installs where the credential file is absent
+
+The same source also supplies `subscriptionType` (e.g. `max` / `pro`) and `rateLimitTier` (e.g. `default_claude_max_20x`) for the optional subscription badge — no separate API call is made.
 
 ## Performance
 

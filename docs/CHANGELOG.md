@@ -4,6 +4,40 @@ All notable changes to claude-lifeline will be documented in this file.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-05-16
+
+### Added
+- **Subscription badge segment** (opt-in via `display.subscription`) — parses
+  `subscriptionType` + `rateLimitTier` from the existing OAuth credentials
+  (`~/.claude/.credentials.json` or macOS Keychain) and renders a compact
+  badge like `MAX·20x`, `MAX·5x`, `PRO`, `FREE`. No additional API call.
+- **Opus 7-day sub-quota segment** (opt-in via `display.seven_day_opus`) —
+  mirrors the Sonnet sub-quota: only renders when Opus usage exceeds pace,
+  prefixed `O:`.
+- **Extra-usage credit-pool segment** (opt-in via `display.extra_usage`) —
+  surfaces the monthly paid top-up balance returned by
+  `/api/oauth/usage` (`extra_usage` node) as `$5.4K/20K 27%` for USD or
+  `[XYZ] used/limit pct%` for other currencies. Auto-hidden when the
+  pool is not enabled on the account (`is_enabled=false`).
+- `OAuthCredential` now exposes `subscription_type` and `rate_limit_tier`
+  fields. `Debug` impl prints both (non-sensitive); `access_token` stays
+  redacted.
+- `LIFELINE_DEBUG=1` environment flag enables one-line `eprintln!` traces
+  for the stdin `rate_limits` payload and `calc_pace` output. Silent by
+  default.
+
+### Fixed
+- **`calc_pace` ETA guard against negative seconds** — when a window was
+  already over budget, `(100 - used) / burn_rate` could yield a negative
+  `secs_to_100` that, when truncated and added to `now`, produced an ETA
+  in the past. Now we early-return `None` unless `secs_to_100 > 0`.
+
+### Compatibility
+- All three new display segments default to **off**, so upgrading from
+  0.2.0 leaves the existing status line untouched.
+- Existing cache files (`~/.claude/claude-lifeline/usage-cache.json`)
+  load cleanly into the extended `CachedUsage` shape via `#[serde(default)]`.
+
 ## [0.2.0] - 2026-05-14
 
 ### Security
