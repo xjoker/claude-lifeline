@@ -101,10 +101,21 @@ const CACHE_TTL_SUCCESS: i64 = 5 * 60;
 
 // ── 公共函数 ──
 
+fn debug_enabled() -> bool {
+    std::env::var("LIFELINE_DEBUG").map(|v| v == "1").unwrap_or(false)
+}
+
 /// 从 stdin rate_limits + cache + API fallback 获取 usage 数据
 pub async fn get_usage_data(rate_limits: Option<&RateLimits>) -> UsageData {
     // 优先级 1: stdin rate_limits
     if let Some(rl) = rate_limits {
+        if debug_enabled() {
+            eprintln!(
+                "[lifeline] rate_limits raw: 5h={:?} 7d={:?}",
+                rl.five_hour.as_ref().map(|w| w.used_percentage),
+                rl.seven_day.as_ref().map(|w| w.used_percentage),
+            );
+        }
         let five_hour = rl.five_hour.as_ref().map(|w| WindowUsage {
             used_percent: w.used_percentage.unwrap_or(0.0),
             resets_at: w.resets_at.as_ref().and_then(parse_resets_at),
@@ -180,8 +191,12 @@ pub fn calc_pace(window: &WindowUsage, window_secs: i64, tolerance: f64) -> Opti
         let burn_rate = window.used_percent / elapsed_secs as f64;
         if burn_rate > 0.0 {
             let secs_to_100 = ((100.0 - window.used_percent) / burn_rate) as i64;
-            let eta = now + chrono::Duration::seconds(secs_to_100);
-            if eta < *resets_at { Some(eta) } else { None }
+            if secs_to_100 > 0 {
+                let eta = now + chrono::Duration::seconds(secs_to_100);
+                if eta < *resets_at { Some(eta) } else { None }
+            } else {
+                None
+            }
         } else {
             None
         }
@@ -200,6 +215,13 @@ pub fn calc_pace(window: &WindowUsage, window_secs: i64, tolerance: f64) -> Opti
     } else {
         None
     };
+
+    if debug_enabled() {
+        eprintln!(
+            "[lifeline] calc_pace: used={:.2} pace={:.2} dir={:?} eta={:?} recovery={:?}s",
+            window.used_percent, pace_percent, direction, depletion_eta, recovery_secs
+        );
+    }
 
     Some(PaceInfo {
         pace_percent,
