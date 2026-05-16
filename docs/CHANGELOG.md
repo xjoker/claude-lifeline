@@ -4,6 +4,55 @@ All notable changes to claude-lifeline will be documented in this file.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-05-16
+
+This release re-shapes `claude-lifeline` from a single-purpose statusline
+binary into a multi-mode companion CLI. The default behaviour is unchanged —
+running `claude-lifeline` with stdin JSON still renders the same status line
+Claude Code expects, so existing `settings.json` integrations keep working
+without modification.
+
+### Added
+- **Subcommand dispatch** (`clap` based). New commands:
+  - `claude-lifeline statusline` — explicit form of the existing default.
+  - `claude-lifeline tui` — interactive ratatui dashboard with four tabs:
+    Sessions, Usage, Config, Logs. Keys: `tab` / `1`-`4` switch tabs,
+    `j`/`k` or arrows navigate, `space` / `enter` toggles config flags,
+    `r` refreshes, `q` / `esc` quits.
+  - `claude-lifeline config {show|path|edit|init}` — inspect and edit
+    `~/.claude/claude-lifeline/config.toml`.
+  - `claude-lifeline update {check|run [--force]}` — query GitHub
+    releases and self-replace the running binary (atomic rename on
+    Unix, rename-aside on Windows). Asset picker matches
+    `darwin-arm64` / `linux-x86_64` / etc.
+  - `claude-lifeline doctor` — diagnostic report covering PATH, data
+    dir, config presence, credentials, transcript count, and the
+    statusLine entry in `~/.claude/settings.json`.
+- **Data layer** (`src/data/`): scans `~/.claude/projects/**/*.jsonl`
+  to summarise sessions (model, branch, token usage, last activity) and
+  rolls up totals per model and per project for today / 7d / all-time.
+  Multi-session statusline calls remain stateless — no shared "current
+  session" file (avoids the documented overwrite anti-pattern).
+- TUI Config view writes back to `config.toml` via an atomic
+  `write → rename` and the regenerated TOML preserves all thresholds.
+
+### Changed
+- Crate is now structured around a richer set of dependencies: `clap`,
+  `ratatui`, `crossterm`, `walkdir`, `sha2`, `futures-util`, `tempfile`.
+  Release-profile size is still dominated by `reqwest`/`rustls`; expect
+  a modest binary-size increase (~1 MB depending on platform).
+- `read_config` and the update cache path now go through
+  `data::paths::*` helpers so every consumer (statusline, TUI, doctor)
+  resolves the same `~/.claude/claude-lifeline/` root.
+
+### Notes
+- The legacy hidden flag `--check-update` is preserved for the
+  background self-spawn used by the statusline path.
+- The TUI deliberately re-reads transcripts each refresh rather than
+  caching a "current session" file shared across terminals — that
+  pattern has been observed to silently overwrite state when multiple
+  Claude Code windows are open.
+
 ## [0.3.0] - 2026-05-16
 
 ### Added

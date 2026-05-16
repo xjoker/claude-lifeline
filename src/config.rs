@@ -1,7 +1,7 @@
 use serde::Deserialize;
 
 /// 用户配置（~/.claude/claude-lifeline/config.toml）
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Clone)]
 pub struct Config {
     #[serde(default = "DisplayConfig::default")]
     pub display: DisplayConfig,
@@ -85,7 +85,7 @@ fn yellow_before_red(y: f64, r: f64) -> bool {
     (0.0..=100.0).contains(&y) && (0.0..=100.0).contains(&r) && y < r
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone, Copy)]
 pub struct DisplayConfig {
     /// 显示 context window 段
     #[serde(default = "yes")]
@@ -127,16 +127,69 @@ impl Default for DisplayConfig {
     }
 }
 
+/// Stable identifier for TUI display toggles. Order is the display order.
+#[derive(Debug, Clone, Copy)]
+pub enum DisplayKey {
+    Context,
+    FiveHour,
+    SevenDay,
+    EditStats,
+    Subscription,
+    SevenDayOpus,
+    ExtraUsage,
+}
+
+impl DisplayKey {
+    pub const ALL: [DisplayKey; 7] = [
+        DisplayKey::Context,
+        DisplayKey::FiveHour,
+        DisplayKey::SevenDay,
+        DisplayKey::EditStats,
+        DisplayKey::Subscription,
+        DisplayKey::SevenDayOpus,
+        DisplayKey::ExtraUsage,
+    ];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            DisplayKey::Context => "context window",
+            DisplayKey::FiveHour => "5h quota",
+            DisplayKey::SevenDay => "7d quota (incl. Sonnet sub-block)",
+            DisplayKey::EditStats => "edit stats (+/-)",
+            DisplayKey::Subscription => "subscription tier badge",
+            DisplayKey::SevenDayOpus => "Opus 7d sub-block",
+            DisplayKey::ExtraUsage => "extra-usage credits",
+        }
+    }
+
+    pub fn get(&self, cfg: &DisplayConfig) -> bool {
+        match self {
+            DisplayKey::Context => cfg.context,
+            DisplayKey::FiveHour => cfg.five_hour,
+            DisplayKey::SevenDay => cfg.seven_day,
+            DisplayKey::EditStats => cfg.edit_stats,
+            DisplayKey::Subscription => cfg.subscription,
+            DisplayKey::SevenDayOpus => cfg.seven_day_opus,
+            DisplayKey::ExtraUsage => cfg.extra_usage,
+        }
+    }
+
+    pub fn set(&self, cfg: &mut DisplayConfig, val: bool) {
+        match self {
+            DisplayKey::Context => cfg.context = val,
+            DisplayKey::FiveHour => cfg.five_hour = val,
+            DisplayKey::SevenDay => cfg.seven_day = val,
+            DisplayKey::EditStats => cfg.edit_stats = val,
+            DisplayKey::Subscription => cfg.subscription = val,
+            DisplayKey::SevenDayOpus => cfg.seven_day_opus = val,
+            DisplayKey::ExtraUsage => cfg.extra_usage = val,
+        }
+    }
+}
+
 /// 读取配置文件，不存在或解析失败时返回默认值；阈值字段超出范围自动回退
 pub fn read_config() -> Config {
-    let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .unwrap_or_default();
-    let path = std::path::PathBuf::from(home)
-        .join(".claude")
-        .join("claude-lifeline")
-        .join("config.toml");
-
+    let path = crate::data::paths::config_path();
     // 限制 128 KiB：防 symlink 到大文件吞内存（真实配置实测 <2 KiB）
     let mut cfg: Config = read_capped(&path, 128 * 1024)
         .and_then(|s| toml::from_str(&s).ok())
@@ -151,4 +204,89 @@ fn read_capped(path: &std::path::Path, max_bytes: u64) -> Option<String> {
     let mut buf = String::new();
     f.by_ref().take(max_bytes).read_to_string(&mut buf).ok()?;
     Some(buf)
+}
+
+/// Persist the entire config to disk. Used by the TUI write path.
+pub fn write_config(config: &Config) -> anyhow::Result<()> {
+    let path = crate::data::paths::config_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let body = render_config_toml(config);
+    let tmp = path.with_extension("toml.tmp");
+    std::fs::write(&tmp, body)?;
+    std::fs::rename(&tmp, &path)?;
+    Ok(())
+}
+
+/// Convenience wrapper: load current config, swap display, write back.
+/// Keeps the user's thresholds intact even when the TUI only edits toggles.
+pub fn write_display(display: &DisplayConfig) -> anyhow::Result<()> {
+    let mut current = read_config();
+    current.display = *display;
+    write_config(&current)
+}
+
+fn render_config_toml(config: &Config) -> String {
+    let mut s = String::new();
+    s.push_str("# claude-lifeline config — generated, edit by hand or via TUI\n\n");
+    s.push_str("[display]\n");
+    s.push_str(&format!("context        = {}\n", config.display.context));
+    s.push_str(&format!("five_hour      = {}\n", config.display.five_hour));
+    s.push_str(&format!("seven_day      = {}\n", config.display.seven_day));
+    s.push_str(&format!("edit_stats     = {}\n", config.display.edit_stats));
+    s.push_str(&format!("subscription   = {}\n", config.display.subscription));
+    s.push_str(&format!("seven_day_opus = {}\n", config.display.seven_day_opus));
+    s.push_str(&format!("extra_usage    = {}\n", config.display.extra_usage));
+    s.push_str("\n[thresholds]\n");
+    s.push_str(&format!("ctx_yellow_at       = {}\n", config.thresholds.ctx_yellow_at));
+    s.push_str(&format!("ctx_red_at          = {}\n", config.thresholds.ctx_red_at));
+    s.push_str(&format!("five_hour_yellow_at = {}\n", config.thresholds.five_hour_yellow_at));
+    s.push_str(&format!("five_hour_red_at    = {}\n", config.thresholds.five_hour_red_at));
+    s.push_str(&format!("seven_day_yellow_at = {}\n", config.thresholds.seven_day_yellow_at));
+    s.push_str(&format!("seven_day_red_at    = {}\n", config.thresholds.seven_day_red_at));
+    s.push_str(&format!("pace_tolerance      = {}\n", config.thresholds.pace_tolerance));
+    s
+}
+
+pub mod cli {
+    use crate::cli::ConfigAction;
+
+    pub async fn run(action: ConfigAction) -> anyhow::Result<()> {
+        match action {
+            ConfigAction::Show => {
+                let cfg = super::read_config();
+                println!("{}", super::render_config_toml(&cfg));
+            }
+            ConfigAction::Path => {
+                println!("{}", crate::data::paths::config_path().display());
+            }
+            ConfigAction::Init => {
+                let path = crate::data::paths::config_path();
+                if path.exists() {
+                    println!("{} already exists — not overwriting.", path.display());
+                } else {
+                    super::write_config(&super::Config::default())?;
+                    println!("wrote {}", path.display());
+                }
+            }
+            ConfigAction::Edit => {
+                let path = crate::data::paths::config_path();
+                if !path.exists() {
+                    super::write_config(&super::Config::default())?;
+                }
+                let editor = std::env::var("VISUAL")
+                    .or_else(|_| std::env::var("EDITOR"))
+                    .unwrap_or_else(|_| if cfg!(windows) { "notepad".into() } else { "vi".into() });
+                let status = std::process::Command::new(&editor)
+                    .arg(&path)
+                    .status()
+                    .map_err(|e| anyhow::anyhow!("failed to launch {editor}: {e}"))?;
+                if !status.success() {
+                    anyhow::bail!("{editor} exited with {status}");
+                }
+            }
+        }
+        Ok(())
+    }
 }

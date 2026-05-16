@@ -275,6 +275,41 @@ pace_tolerance      = 0.0
 
 See [config.example.toml](config.example.toml) for reference.
 
+## CLI Commands
+
+Starting with **0.4.0**, `claude-lifeline` is more than a status line. Running it
+with no arguments (the way Claude Code invokes it) keeps the original
+stdin-driven status-line behaviour, but the same binary now offers:
+
+```bash
+claude-lifeline tui               # Interactive ratatui dashboard:
+                                  # · Sessions list across all projects
+                                  # · Live 5h / 7d / Opus quota gauges
+                                  # · Today / 7d / all-time rollups
+                                  # · Config toggles (writes back to TOML)
+                                  # Keys: tab/1-4 switch, j/k navigate,
+                                  #       space/enter toggle, r refresh,
+                                  #       q/esc quit
+
+claude-lifeline config show       # Print resolved config
+claude-lifeline config path       # Print path to config.toml
+claude-lifeline config edit       # Open config.toml in $EDITOR
+claude-lifeline config init       # Seed config.toml from defaults
+
+claude-lifeline update check      # Compare local version to GitHub release
+claude-lifeline update run        # Download and atomically replace the
+                                  # running binary with the latest release
+                                  # asset for this platform
+
+claude-lifeline doctor            # Diagnostic report: PATH, data dir,
+                                  # credentials, transcript count, and
+                                  # Claude Code statusLine integration
+```
+
+The TUI scans `~/.claude/projects/**/*.jsonl` on each refresh — no shared
+session-state file is written, so it is safe to keep open while multiple
+Claude Code windows are active.
+
 ## Data Sources
 
 Rate limit data is resolved in priority order:

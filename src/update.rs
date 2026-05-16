@@ -3,6 +3,7 @@ use std::path::PathBuf;
 /// 升级检查缓存（24h TTL，不阻塞主流程）
 const CHECK_INTERVAL_SECS: i64 = 24 * 3600;
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
+const RELEASES_API: &str = "https://api.github.com/repos/xjoker/claude-lifeline/releases/latest";
 
 /// 本地是否为 dev/预发布构建（版本号含 `-` 后缀，如 `0.0.4-dev`）。
 /// dev 构建由开发者自行管理版本，不参与自动更新提示。
@@ -17,13 +18,7 @@ struct UpdateCache {
 }
 
 fn cache_path() -> PathBuf {
-    let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .unwrap_or_else(|_| "/tmp".to_string());
-    PathBuf::from(home)
-        .join(".claude")
-        .join("claude-lifeline")
-        .join("update-cache.json")
+    crate::data::paths::lifeline_data_root().join("update-cache.json")
 }
 
 /// 读取本地缓存，返回新版本号（如果有更新）。纯文件读取，sub-ms。
@@ -40,9 +35,6 @@ pub fn check_update_hint() -> Option<String> {
 
     // 缓存过期 → 触发后台检查
     if now - cache.checked_at >= CHECK_INTERVAL_SECS {
-        // 先写 sentinel（把 timestamp 刷成当前），避免后台子进程完成前主进程每
-        // ~300ms 调用一次都重新 spawn —— 实测首次安装后若不 touch，5s 内会 fork 15+
-        // 个子进程同时发起 5s 网络超时，全是无用功
         touch_cache_sentinel();
         spawn_background_check();
     }
@@ -52,10 +44,7 @@ pub fn check_update_hint() -> Option<String> {
         return None;
     }
 
-    // 比较版本（按 SemVer 元组比较，避免 lex 比较把 0.0.10 当成早于 0.0.4）
     if version_gt(&cache.latest_version, CURRENT_VERSION) {
-        // sanitize + 截断：cache 文件被本地写入或 MITM GitHub 时，tag_name 可能
-        // 含 ESC 控制符或异常长度，未过滤会注入 ANSI 转义污染状态栏
         let cleaned: String = crate::input::sanitize_external(&cache.latest_version)
             .chars()
             .take(20)
@@ -68,7 +57,7 @@ pub fn check_update_hint() -> Option<String> {
 
 /// 解析 X.Y.Z（忽略 -suffix 部分）为 (u32, u32, u32) 元组
 fn parse_version(v: &str) -> Option<(u32, u32, u32)> {
-    let core = v.split('-').next()?; // 剥掉 -dev 等后缀
+    let core = v.split('-').next()?;
     let mut parts = core.splitn(3, '.');
     let major = parts.next()?.parse().ok()?;
     let minor = parts.next()?.parse().ok()?;
@@ -76,7 +65,6 @@ fn parse_version(v: &str) -> Option<(u32, u32, u32)> {
     Some((major, minor, patch))
 }
 
-/// 严格大于：a > b。解析失败时回退为字符串比较
 fn version_gt(a: &str, b: &str) -> bool {
     match (parse_version(a), parse_version(b)) {
         (Some(va), Some(vb)) => va > vb,
@@ -84,7 +72,6 @@ fn version_gt(a: &str, b: &str) -> bool {
     }
 }
 
-/// 首次无缓存时也触发后台检查（先写 sentinel 避免并发 spawn 风暴）
 pub fn ensure_cache_exists() {
     if is_dev_build() {
         return;
@@ -96,9 +83,6 @@ pub fn ensure_cache_exists() {
     }
 }
 
-/// 写入 sentinel cache：latest_version = 当前版本 + 当前时间戳。
-/// 作用是让后续快速连续的主进程调用看到新鲜 cache → 不再 re-spawn。
-/// 真正的 fetch_latest_version 完成后会 overwrite 这份 cache。
 fn touch_cache_sentinel() {
     let path = cache_path();
     if let Some(parent) = path.parent() {
@@ -113,7 +97,6 @@ fn touch_cache_sentinel() {
     }
 }
 
-/// 派生后台子进程检查更新（不等待结果）
 fn spawn_background_check() {
     if let Ok(exe) = std::env::current_exe() {
         let _ = std::process::Command::new(exe)
@@ -126,9 +109,6 @@ fn spawn_background_check() {
 }
 
 /// 实际执行网络检查并写入缓存（由 --check-update 子进程调用）
-///
-/// 即使网络失败也会写入 cache（latest_version = 当前版本），避免 `ensure_cache_exists`
-/// 在离线时反复 spawn 子进程检查更新（每次主进程调用都触发，~300ms 一次）
 pub async fn do_update_check() {
     let version = fetch_latest_version()
         .await
@@ -155,7 +135,7 @@ async fn fetch_latest_version() -> Option<String> {
         .ok()?;
 
     let resp = client
-        .get("https://api.github.com/repos/xjoker/claude-lifeline/releases/latest")
+        .get(RELEASES_API)
         .header("User-Agent", "claude-lifeline")
         .send()
         .await
@@ -167,6 +147,202 @@ async fn fetch_latest_version() -> Option<String> {
 
     let body: serde_json::Value = resp.json().await.ok()?;
     let tag = body.get("tag_name")?.as_str()?;
-    // "v0.0.2" → "0.0.2"
     Some(tag.trim_start_matches('v').to_string())
+}
+
+// ── self-update binary replacement ──
+
+#[derive(Debug, serde::Deserialize)]
+struct Release {
+    tag_name: String,
+    assets: Vec<ReleaseAsset>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct ReleaseAsset {
+    name: String,
+    browser_download_url: String,
+    #[serde(default)]
+    size: u64,
+}
+
+/// Hard-cap downloaded asset size — refuse anything beyond this. The release
+/// binary is currently a few MiB; cap at 100 MiB to be future-proof while still
+/// rejecting a hostile redirect to a multi-GiB tarball.
+const ASSET_MAX_BYTES: u64 = 100 * 1024 * 1024;
+
+async fn fetch_release() -> anyhow::Result<Release> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()?;
+    let resp = client
+        .get(RELEASES_API)
+        .header("User-Agent", "claude-lifeline")
+        .send()
+        .await?
+        .error_for_status()?;
+    Ok(resp.json().await?)
+}
+
+/// Pick the asset matching the running platform.
+fn pick_asset<'a>(release: &'a Release) -> Option<&'a ReleaseAsset> {
+    let candidates = platform_asset_patterns();
+    release.assets.iter().find(|a| {
+        let name = a.name.to_lowercase();
+        candidates.iter().any(|p| name.contains(p))
+    })
+}
+
+fn platform_asset_patterns() -> Vec<&'static str> {
+    let os = std::env::consts::OS;
+    let arch = std::env::consts::ARCH;
+    match (os, arch) {
+        ("macos", "aarch64") => vec!["darwin-arm64", "darwin-aarch64", "aarch64-apple-darwin", "macos-arm64"],
+        ("macos", "x86_64") => vec!["darwin-x86_64", "darwin-amd64", "x86_64-apple-darwin", "macos-x86_64"],
+        ("linux", "x86_64") => vec!["linux-x86_64", "linux-amd64", "x86_64-unknown-linux"],
+        ("linux", "aarch64") => vec!["linux-aarch64", "linux-arm64", "aarch64-unknown-linux"],
+        ("windows", "x86_64") => vec!["windows-x86_64", "windows-amd64", "x86_64-pc-windows", ".exe"],
+        _ => vec![],
+    }
+}
+
+async fn download_to(temp_path: &std::path::Path, asset: &ReleaseAsset) -> anyhow::Result<()> {
+    use futures_util::StreamExt;
+    use tokio::io::AsyncWriteExt;
+
+    if asset.size > ASSET_MAX_BYTES {
+        anyhow::bail!(
+            "asset {} declares size {} > cap {ASSET_MAX_BYTES}",
+            asset.name, asset.size
+        );
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()?;
+    let resp = client
+        .get(&asset.browser_download_url)
+        .header("User-Agent", "claude-lifeline")
+        .send()
+        .await?
+        .error_for_status()?;
+
+    let mut file = tokio::fs::File::create(temp_path).await?;
+    let mut stream = resp.bytes_stream();
+    let mut written: u64 = 0;
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+        written += chunk.len() as u64;
+        if written > ASSET_MAX_BYTES {
+            anyhow::bail!("download exceeded cap {ASSET_MAX_BYTES} bytes");
+        }
+        file.write_all(&chunk).await?;
+    }
+    file.flush().await?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn make_executable(path: &std::path::Path) -> anyhow::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let mut perm = std::fs::metadata(path)?.permissions();
+    perm.set_mode(0o755);
+    std::fs::set_permissions(path, perm)?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn make_executable(_path: &std::path::Path) -> anyhow::Result<()> {
+    Ok(())
+}
+
+/// Atomic-ish swap. On Unix `rename` over a running binary works; on Windows
+/// we have to rename the current binary aside first.
+fn install_binary(downloaded: &std::path::Path, target: &std::path::Path) -> anyhow::Result<()> {
+    #[cfg(unix)]
+    {
+        std::fs::rename(downloaded, target)?;
+        Ok(())
+    }
+    #[cfg(windows)]
+    {
+        let backup = target.with_extension("old");
+        // Best-effort: ignore failure to remove a stale backup
+        let _ = std::fs::remove_file(&backup);
+        std::fs::rename(target, &backup)?;
+        std::fs::rename(downloaded, target)?;
+        Ok(())
+    }
+}
+
+pub mod cli {
+    use crate::cli::UpdateAction;
+
+    pub async fn run(action: UpdateAction) -> anyhow::Result<()> {
+        match action {
+            UpdateAction::Check => check().await,
+            UpdateAction::Run { force } => upgrade(force).await,
+        }
+    }
+
+    async fn check() -> anyhow::Result<()> {
+        let current = super::CURRENT_VERSION;
+        let release = super::fetch_release().await?;
+        let latest = release.tag_name.trim_start_matches('v');
+        if super::version_gt(latest, current) {
+            println!("Update available: {current} → {latest}");
+            println!("Run `claude-lifeline update run` to upgrade.");
+        } else {
+            println!("Up to date ({current}).");
+        }
+        Ok(())
+    }
+
+    async fn upgrade(force: bool) -> anyhow::Result<()> {
+        let release = super::fetch_release().await?;
+        let latest = release.tag_name.trim_start_matches('v').to_string();
+        if !force && !super::version_gt(&latest, super::CURRENT_VERSION) {
+            println!("Already at {} — pass --force to reinstall.", super::CURRENT_VERSION);
+            return Ok(());
+        }
+
+        let asset = super::pick_asset(&release).ok_or_else(|| {
+            anyhow::anyhow!(
+                "no release asset matched platform {}/{} — available: {}",
+                std::env::consts::OS,
+                std::env::consts::ARCH,
+                release
+                    .assets
+                    .iter()
+                    .map(|a| a.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        })?;
+
+        println!("Downloading {} ...", asset.name);
+        let exe = std::env::current_exe()?;
+        let parent = exe.parent().ok_or_else(|| anyhow::anyhow!("cannot resolve parent of current_exe"))?;
+        let temp = parent.join(format!(".claude-lifeline.{}.download", std::process::id()));
+        super::download_to(&temp, asset).await?;
+        super::make_executable(&temp)?;
+
+        println!("Installing → {}", exe.display());
+        if let Err(e) = super::install_binary(&temp, &exe) {
+            let _ = std::fs::remove_file(&temp);
+            return Err(anyhow::anyhow!("install failed: {e}"));
+        }
+
+        // Refresh the update cache so the status line stops showing the hint
+        let new_cache = super::UpdateCache {
+            latest_version: latest.clone(),
+            checked_at: chrono::Utc::now().timestamp(),
+        };
+        if let Ok(json) = serde_json::to_string(&new_cache) {
+            let _ = std::fs::write(super::cache_path(), json);
+        }
+
+        println!("Upgraded to {latest}.");
+        Ok(())
+    }
 }
