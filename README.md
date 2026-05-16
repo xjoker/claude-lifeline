@@ -351,6 +351,17 @@ For the API fallback, OAuth token is read from:
 
 The same source also supplies `subscriptionType` (e.g. `max` / `pro`) and `rateLimitTier` (e.g. `default_claude_max_20x`) for the optional subscription badge — no separate API call is made.
 
+### Custom config directory
+
+If you've moved Claude Code's config away from `~/.claude` (e.g. on a shared workstation or in CI), set the `CLAUDE_CONFIG_DIR` environment variable — the same one Claude Code itself reads. Every claude-lifeline path follows along:
+
+```bash
+export CLAUDE_CONFIG_DIR=/srv/team-config
+claude-lifeline doctor      # all paths now rooted at /srv/team-config
+```
+
+Empty / whitespace values fall back to the default. `claude-lifeline doctor` prints the resolved root and marks it explicitly when overridden by the env var.
+
 ## Supported Platforms
 
 | Platform | Architecture | Binary |

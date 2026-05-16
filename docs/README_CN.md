@@ -272,6 +272,17 @@ pace_tolerance      = 0.0
 
 参考 [config.example.toml](../config.example.toml)。
 
+### 自定义配置目录
+
+如果你把 Claude Code 的配置移出了 `~/.claude`（共享工作站、CI 环境等），设置 `CLAUDE_CONFIG_DIR` 环境变量即可 —— claude-lifeline 读的是 Claude Code 同款变量。所有路径自动跟随：
+
+```bash
+export CLAUDE_CONFIG_DIR=/srv/team-config
+claude-lifeline doctor      # 所有路径都改根于 /srv/team-config
+```
+
+空值或纯空白会回退到默认。`claude-lifeline doctor` 会打印解析后的根目录，并标注 env var 是否生效。
+
 ## 数据源
 
 Rate limit 数据按优先级解析：

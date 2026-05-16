@@ -7,6 +7,7 @@ pub async fn run() -> anyhow::Result<()> {
     println!();
 
     check_binary_on_path();
+    check_claude_root();
     check_data_dir();
     check_config();
     check_credentials();
@@ -16,6 +17,18 @@ pub async fn run() -> anyhow::Result<()> {
     println!();
     println!("Done. Anything red above is worth addressing.");
     Ok(())
+}
+
+fn check_claude_root() {
+    let root = crate::data::paths::claude_root();
+    let env_override = std::env::var("CLAUDE_CONFIG_DIR")
+        .ok()
+        .filter(|v| !v.trim().is_empty());
+    let detail = match env_override {
+        Some(_) => format!("{} (CLAUDE_CONFIG_DIR override)", root.display()),
+        None => root.display().to_string(),
+    };
+    line(root.exists(), "claude root", &detail);
 }
 
 fn line(ok: bool, label: &str, detail: &str) {

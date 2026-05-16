@@ -4,6 +4,13 @@ All notable changes to claude-lifeline will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- `CLAUDE_CONFIG_DIR` environment variable is now honored — the same env var
+  Claude Code itself reads. When set to a non-empty value, every derived path
+  (`projects/`, `claude-lifeline/`, `.credentials.json`) re-roots there.
+  Whitespace-only values fall back to the `~/.claude` default. `doctor` reports
+  the resolved root and flags when the override is in effect.
+
 ## [0.4.0] - 2026-05-16
 
 This release re-shapes `claude-lifeline` from a single-purpose statusline
