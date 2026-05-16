@@ -1,5 +1,6 @@
 use crate::config::{Config, Thresholds};
 use crate::git::GitInfo;
+use crate::history::TrendInfo;
 use crate::input::StdinData;
 use crate::usage::UsageData;
 
@@ -11,6 +12,10 @@ pub struct RenderContext {
     pub usage: UsageData,
     pub config: Config,
     pub update_hint: Option<String>,
+    /// Burn-rate trend for the 5h window, if we have enough history. The arrow only
+    /// renders when the trend is confident — `None` here means "no signal to display".
+    pub trend_5h: Option<TrendInfo>,
+    pub trend_7d: Option<TrendInfo>,
 }
 
 // ── 公共函数 ──
@@ -255,9 +260,11 @@ fn quota_block_colors(pct: f64, over: bool, yellow_at: f64, red_at: f64) -> (u8,
 /// 两块靠位置/顺序区分：5h 永远在 7d 左边
 ///
 /// pace 由调用方传入，避免在外层判断 over 后内部再算一次（也防止 Utc::now() 跨秒导致两次结果不一致）。
+/// trend 同样由外层传入；只在 confident（样本足够）时附加 `^` (加速) 或 `v` (减速)。
 fn quota_block(
     w: &crate::usage::WindowUsage,
     pace: Option<&crate::usage::PaceInfo>,
+    trend: Option<&crate::history::TrendInfo>,
     label: &str,
     yellow_at: f64,
     red_at: f64,
@@ -292,11 +299,27 @@ fn quota_block(
         (String::new(), String::new())
     };
 
+    let trend_glyph = trend_glyph(trend);
+
     let text = format!(
-        "{prefix}{:.0}/{:.0}%{alert}{eta_str}{wait_str}",
+        "{prefix}{:.0}/{:.0}%{alert}{eta_str}{wait_str}{trend_glyph}",
         w.used_percent, pace_pct
     );
     block(bg, fg, &text)
+}
+
+/// Trend arrow chooser. Returns a leading space + glyph when the trend is confident
+/// and non-flat; empty otherwise. We use `^` / `v` instead of `↑` / `↓` to avoid
+/// colliding visually with the `↓Xh` recovery-wait suffix that already uses `↓`.
+fn trend_glyph(trend: Option<&crate::history::TrendInfo>) -> &'static str {
+    let Some(t) = trend.filter(|t| t.is_confident()) else {
+        return "";
+    };
+    match t.direction {
+        crate::history::TrendDirection::Accelerating => " ^",
+        crate::history::TrendDirection::Decelerating => " v",
+        crate::history::TrendDirection::Flat => "",
+    }
 }
 
 /// 扩容池金额紧凑显示：>=1000 用 1.2K 风格，<1000 取整。
@@ -465,6 +488,7 @@ fn render_mini(ctx: &RenderContext) {
             metrics.push(quota_block(
                 w,
                 pace.as_ref(),
+                ctx.trend_5h.as_ref(),
                 "",
                 t.five_hour_yellow_at,
                 t.five_hour_red_at,
@@ -479,6 +503,7 @@ fn render_mini(ctx: &RenderContext) {
             metrics.push(quota_block(
                 w,
                 pace.as_ref(),
+                ctx.trend_7d.as_ref(),
                 "",
                 t.seven_day_yellow_at,
                 t.seven_day_red_at,
@@ -491,9 +516,12 @@ fn render_mini(ctx: &RenderContext) {
         if let Some(w) = &ctx.usage.seven_day_sonnet {
             let pace = crate::usage::calc_pace(w, crate::usage::WINDOW_7D_SECS, t.pace_tolerance);
             if pace.as_ref().is_some_and(|p| p.direction == crate::usage::PaceDirection::Over) {
+                // Sub-quotas share the 7d window trend signal — we don't track per-model
+                // burn rates yet (would require richer rate_limits fields than CC sends).
                 metrics.push(quota_block(
                     w,
                     pace.as_ref(),
+                    ctx.trend_7d.as_ref(),
                     "S",
                     t.seven_day_yellow_at,
                     t.seven_day_red_at,
@@ -510,6 +538,7 @@ fn render_mini(ctx: &RenderContext) {
                 metrics.push(quota_block(
                     w,
                     pace.as_ref(),
+                    ctx.trend_7d.as_ref(),
                     "O",
                     t.seven_day_yellow_at,
                     t.seven_day_red_at,

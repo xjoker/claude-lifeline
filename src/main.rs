@@ -4,6 +4,7 @@ mod config;
 mod data;
 mod doctor;
 mod git;
+mod history;
 mod input;
 mod json_render;
 mod render;

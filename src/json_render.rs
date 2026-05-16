@@ -9,6 +9,7 @@
 use serde_json::{json, Value};
 
 use crate::config::Thresholds;
+use crate::history::{TrendDirection, TrendInfo};
 use crate::render::RenderContext;
 use crate::usage::{PaceDirection, PaceInfo, WindowUsage};
 
@@ -117,6 +118,7 @@ fn quotas_value(ctx: &RenderContext) -> Value {
             t.five_hour_yellow_at,
             t.five_hour_red_at,
             t.pace_tolerance,
+            ctx.trend_5h.as_ref(),
         ),
         "seven_day": quota_window(
             ctx.usage.seven_day.as_ref(),
@@ -124,6 +126,7 @@ fn quotas_value(ctx: &RenderContext) -> Value {
             t.seven_day_yellow_at,
             t.seven_day_red_at,
             t.pace_tolerance,
+            ctx.trend_7d.as_ref(),
         ),
         "seven_day_sonnet": quota_window(
             ctx.usage.seven_day_sonnet.as_ref(),
@@ -131,6 +134,7 @@ fn quotas_value(ctx: &RenderContext) -> Value {
             t.seven_day_yellow_at,
             t.seven_day_red_at,
             t.pace_tolerance,
+            ctx.trend_7d.as_ref(),
         ),
         "seven_day_opus": quota_window(
             ctx.usage.seven_day_opus.as_ref(),
@@ -138,6 +142,7 @@ fn quotas_value(ctx: &RenderContext) -> Value {
             t.seven_day_yellow_at,
             t.seven_day_red_at,
             t.pace_tolerance,
+            ctx.trend_7d.as_ref(),
         ),
     })
 }
@@ -148,6 +153,7 @@ fn quota_window(
     yellow_at: f64,
     red_at: f64,
     pace_tolerance: f64,
+    trend: Option<&TrendInfo>,
 ) -> Value {
     let Some(w) = window else {
         return Value::Null;
@@ -158,7 +164,26 @@ fn quota_window(
         "used_percent": w.used_percent,
         "resets_at": w.resets_at.map(|t| t.to_rfc3339()),
         "pace": pace_value(pace.as_ref()),
+        "trend": trend_value(trend),
         "level": level,
+    })
+}
+
+fn trend_value(trend: Option<&TrendInfo>) -> Value {
+    let Some(t) = trend else {
+        return Value::Null;
+    };
+    let direction = match t.direction {
+        TrendDirection::Accelerating => "accelerating",
+        TrendDirection::Decelerating => "decelerating",
+        TrendDirection::Flat => "flat",
+    };
+    json!({
+        "direction": direction,
+        "short_burn_per_sec": t.short_burn_per_sec,
+        "long_burn_per_sec": t.long_burn_per_sec,
+        "sample_count": t.sample_count,
+        "confident": t.is_confident(),
     })
 }
 

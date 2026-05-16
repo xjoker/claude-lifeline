@@ -32,7 +32,12 @@ claude-lifeline answers both. For each rate-limit window it computes a **pace ma
 | **`!`** | `85/23%!` | Used 85% but only 23% of the window has elapsed → over-pace alert |
 | **`→HH:MM`** | `→9:35` | Depletion ETA at the current burn rate (`M/D HH:MM` if next day) |
 | **`↓Xh`** | `↓2h` | Pause this long for pace to align back with usage |
+| **`^` / `v`** | `15/24% ^` | Burn-rate trend arrow — accelerating (`^`) or decelerating (`v`) vs the window average. Appears only when there are enough samples for a confident signal |
 | **`S:` / `O:` sub-block** | `S:87/68%!` | Sonnet- or Opus-specific quota over-pace (hidden otherwise) |
+
+### Burn-rate trend
+
+The trend arrow uses two EWMAs — a short half-life that tracks "what's happening right now" and a long half-life that represents the window's average. When the short rate clearly diverges from the long rate, an arrow appears. The arrow is suppressed when fewer than 4 samples are available (fresh session, just started) so you don't act on noise. History is stored per `session_id` at `<claude_root>/claude-lifeline/history/`, so multi-window Claude Code sessions track independently without stepping on each other.
 
 ### What it shows by default
 

@@ -118,11 +118,52 @@ async fn statusline_run_inner(json: bool) -> anyhow::Result<()> {
     let update_hint = crate::update::check_update_hint();
     crate::update::ensure_cache_exists();
 
-    let ctx = crate::render::RenderContext { stdin, git, usage, config, update_hint };
+    // Burn-rate history: only record when the stdin payload carried fresh rate_limits
+    // (priority 1 in get_usage_data). Cache or API fallbacks would poison the EWMA
+    // with stale repeats; the advisor flagged this as a non-negotiable defense.
+    let (trend_5h, trend_7d) = record_and_compute_trends(&stdin);
+
+    let ctx = crate::render::RenderContext {
+        stdin,
+        git,
+        usage,
+        config,
+        update_hint,
+        trend_5h,
+        trend_7d,
+    };
     if json {
         crate::render::render_json(&ctx);
     } else {
         crate::render::render(&ctx);
     }
     Ok(())
+}
+
+/// Append one sample to the per-session history (only when stdin supplied fresh
+/// rate_limits) and return the resulting trend for each window. Cleanup runs
+/// probabilistically here so we don't grow `history/` indefinitely.
+fn record_and_compute_trends(
+    stdin: &crate::input::StdinData,
+) -> (Option<crate::history::TrendInfo>, Option<crate::history::TrendInfo>) {
+    let Some(rl) = stdin.rate_limits.as_ref() else {
+        return (None, None);
+    };
+    let five = rl.five_hour.as_ref().and_then(|w| w.used_percentage);
+    let seven = rl.seven_day.as_ref().and_then(|w| w.used_percentage);
+    if five.is_none() && seven.is_none() {
+        return (None, None);
+    }
+
+    let sample = crate::history::Sample {
+        at: chrono::Utc::now(),
+        five_hour: five,
+        seven_day: seven,
+    };
+    let samples = crate::history::append(stdin.session_id.as_deref(), sample);
+    crate::history::maybe_cleanup();
+
+    let trend_5h = crate::history::compute_trend(&samples, crate::history::Window::FiveHour);
+    let trend_7d = crate::history::compute_trend(&samples, crate::history::Window::SevenDay);
+    (trend_5h, trend_7d)
 }

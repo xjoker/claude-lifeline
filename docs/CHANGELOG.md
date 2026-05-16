@@ -17,6 +17,19 @@ All notable changes to claude-lifeline will be documented in this file.
   re-parse on every release. Useful for tmux status lines, IDE prompt
   segments, or scripts that want to act on `pace.direction == "over"` or
   `quotas.five_hour.pace.depletion_eta`.
+- **Burn-rate trend arrows** (`^` / `v`) appended to the quota block when the
+  short-window burn rate clearly diverges from the window average. Uses two
+  EWMAs (α≈0.3 / α≈0.05) computed over per-session sample history at
+  `<claude_root>/claude-lifeline/history/<session_id>.jsonl`. Arrow is
+  suppressed when fewer than 4 valid samples exist — that's the confidence
+  signal, not a separate glyph. Samples are recorded only when stdin carries
+  fresh `rate_limits` (not from cache or API fallback), and Δt > 5 min between
+  samples is dropped to defend against laptop sleep poisoning the EWMA.
+  Probabilistic TTL cleanup (~1/50 invocations) prunes files older than 24h.
+- JSON output gains a `quotas.<window>.trend` field exposing
+  `{ direction, short_burn_per_sec, long_burn_per_sec, sample_count, confident }`
+  for every quota window, regardless of ANSI display threshold — JSON
+  consumers see the data even when the ANSI renderer suppresses the glyph.
 
 ### Changed
 - **TUI scope narrowed.** The Sessions and Usage tabs added in 0.4.0 have been
