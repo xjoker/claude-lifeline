@@ -283,6 +283,16 @@ claude-lifeline doctor      # 所有路径都改根于 /srv/team-config
 
 空值或纯空白会回退到默认。`claude-lifeline doctor` 会打印解析后的根目录，并标注 env var 是否生效。
 
+## --json 输出
+
+加 `--json` flag 即可输出 schema 稳定的 JSON 快照（适合 tmux 状态栏、IDE、脚本消费）：
+
+```bash
+claude-lifeline --json
+```
+
+Schema：`schema_version=1`，含 `model` / `project` / `git` / `edits` / `context` / `quotas`（五小时/七天/Sonnet/Opus 各窗口含 `pace.direction`、`pace.depletion_eta`、`pace.recovery_secs`）/ `subscription` / `extra_usage` / `update_hint`。新增字段保持向后兼容，不会破坏现有消费者。
+
 ## 数据源
 
 Rate limit 数据按优先级解析：
