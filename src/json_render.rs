@@ -268,6 +268,10 @@ fn quota_level_for_extra(util: f64, t: &Thresholds) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::Config;
+    use crate::git::GitInfo;
+    use crate::input::StdinData;
+    use crate::usage::UsageData;
 
     #[test]
     fn model_tier_classification() {
@@ -293,5 +297,71 @@ mod tests {
         assert_eq!(quota_level(80.0, None, 75.0, 90.0), "yellow");
         // Above red regardless → red
         assert_eq!(quota_level(95.0, None, 75.0, 90.0), "red");
+    }
+
+    #[test]
+    fn schema_v1_top_level_keys_are_stable() {
+        // The JSON schema is a compatibility surface — consumers (tmux configs, IDE
+        // plugins, scripts) parse `schema_version` and rely on the documented keys.
+        // This test pins the set of top-level keys so accidental rename/remove of a
+        // field gets caught here rather than out in user scripts.
+        let ctx = empty_ctx();
+        let v = build(&ctx);
+        let obj = v.as_object().expect("root is an object");
+        let mut keys: Vec<&str> = obj.keys().map(String::as_str).collect();
+        keys.sort();
+        assert_eq!(
+            keys,
+            vec![
+                "context",
+                "edits",
+                "extra_usage",
+                "git",
+                "lifeline_version",
+                "model",
+                "project",
+                "quotas",
+                "schema_version",
+                "subscription",
+                "timestamp",
+                "update_hint",
+            ]
+        );
+        // schema_version must remain 1 until a breaking change is intentional.
+        assert_eq!(obj["schema_version"].as_u64(), Some(1));
+    }
+
+    #[test]
+    fn schema_v1_quota_keys_are_stable() {
+        // When a window has data, its sub-object must always carry the same field set
+        // (callers parse trend/level/pace defensively, but null vs missing matters).
+        let mut ctx = empty_ctx();
+        ctx.usage.five_hour = Some(crate::usage::WindowUsage {
+            used_percent: 12.0,
+            resets_at: None,
+        });
+        let v = build(&ctx);
+        let fh = v["quotas"]["five_hour"].as_object().expect("five_hour object");
+        let mut keys: Vec<&str> = fh.keys().map(String::as_str).collect();
+        keys.sort();
+        assert_eq!(keys, vec!["level", "pace", "resets_at", "trend", "used_percent"]);
+    }
+
+    fn empty_ctx() -> RenderContext {
+        RenderContext {
+            stdin: StdinData::default(),
+            git: GitInfo::default(),
+            usage: UsageData {
+                five_hour: None,
+                seven_day: None,
+                seven_day_sonnet: None,
+                seven_day_opus: None,
+                extra_usage: None,
+            },
+            config: Config::default(),
+            update_hint: None,
+            trend_5h: None,
+            trend_7d: None,
+        }
     }
 }

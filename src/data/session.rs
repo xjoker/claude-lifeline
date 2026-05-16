@@ -136,3 +136,73 @@ fn parse_ts(s: &str) -> Option<DateTime<Utc>> {
         .ok()
         .map(|dt| dt.with_timezone(&Utc))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn write_jsonl(lines: &[&str]) -> tempfile::NamedTempFile {
+        let mut f = tempfile::Builder::new()
+            .suffix(".jsonl")
+            .tempfile()
+            .expect("create tempfile");
+        for line in lines {
+            writeln!(f, "{}", line).unwrap();
+        }
+        f.flush().unwrap();
+        f
+    }
+
+    #[test]
+    fn summarize_extracts_first_seen_fields() {
+        let f = write_jsonl(&[
+            r#"{"type":"user","timestamp":"2026-05-17T01:00:00Z","cwd":"/home/me/proj","message":{"model":"claude-opus-4-7","content":"hi"}}"#,
+            r#"{"type":"assistant","timestamp":"2026-05-17T01:00:01Z","message":{"model":"claude-opus-4-7"}}"#,
+        ]);
+        let summary = summarize_transcript(f.path()).expect("summary");
+        assert_eq!(summary.project_dir.as_deref(), Some("/home/me/proj"));
+        assert_eq!(summary.model.as_deref(), Some("claude-opus-4-7"));
+        assert!(summary.started_at.is_some());
+    }
+
+    #[test]
+    fn malformed_lines_are_skipped() {
+        // Parser must be tolerant — a corrupted line shouldn't kill the whole summary.
+        let f = write_jsonl(&[
+            "this is not JSON at all",
+            r#"{"type":"user","timestamp":"2026-05-17T01:00:00Z","cwd":"/x","message":{"model":"sonnet"}}"#,
+            r#"{"oops":"missing closing brace""#,
+        ]);
+        let summary = summarize_transcript(f.path()).expect("summary");
+        assert_eq!(summary.project_dir.as_deref(), Some("/x"));
+        assert_eq!(summary.model.as_deref(), Some("sonnet"));
+    }
+
+    #[test]
+    fn unknown_fields_ignored() {
+        // CC ships transcripts with many fields we don't model. Make sure adding new
+        // ones in CC doesn't break our parser.
+        let f = write_jsonl(&[
+            r#"{"type":"user","timestamp":"2026-05-17T01:00:00Z","cwd":"/y","sessionId":"abc","uuid":"x","gitBranch":"main","futureField":42,"message":{"model":"haiku","extra":"junk"}}"#,
+        ]);
+        let summary = summarize_transcript(f.path()).expect("summary");
+        assert_eq!(summary.model.as_deref(), Some("haiku"));
+    }
+
+    #[test]
+    fn empty_or_missing_file_yields_summary_with_no_fields() {
+        let f = write_jsonl(&[]);
+        let summary = summarize_transcript(f.path()).expect("summary even when empty");
+        // session_id is always set from filename; other fields stay None.
+        assert!(summary.started_at.is_none());
+        assert!(summary.model.is_none());
+        assert!(summary.project_dir.is_none());
+    }
+
+    #[test]
+    fn nonexistent_path_returns_none() {
+        let path = std::path::Path::new("/definitely/does/not/exist.jsonl");
+        assert!(summarize_transcript(path).is_none());
+    }
+}
