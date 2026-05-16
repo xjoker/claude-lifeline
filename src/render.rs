@@ -531,3 +531,94 @@ fn render_mini(ctx: &RenderContext) {
         println!("{b}");
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::usage::ExtraUsage;
+
+    fn strip_ansi(s: &str) -> String {
+        let mut out = String::new();
+        let mut chars = s.chars();
+        while let Some(c) = chars.next() {
+            if c == '\x1b' {
+                if let Some('[') = chars.next() {
+                    for c2 in chars.by_ref() {
+                        if ('\x40'..='\x7e').contains(&c2) {
+                            break;
+                        }
+                    }
+                }
+                continue;
+            }
+            out.push(c);
+        }
+        out
+    }
+
+    #[test]
+    fn credits_compact_format() {
+        assert_eq!(format_credits(0.0), "0");
+        assert_eq!(format_credits(123.4), "123");
+        assert_eq!(format_credits(999.0), "999");
+        assert_eq!(format_credits(1_000.0), "1.0K");
+        assert_eq!(format_credits(5_440.0), "5.4K");
+        assert_eq!(format_credits(20_000.0), "20K");
+        assert_eq!(format_credits(123_456.0), "123K");
+    }
+
+    #[test]
+    fn extra_usage_block_usd_format() {
+        let extra = ExtraUsage {
+            monthly_limit: 20_000.0,
+            used_credits: 5_440.0,
+            utilization: 27.2,
+            currency: "USD".into(),
+        };
+        let t = Thresholds::default();
+        let plain = strip_ansi(&extra_usage_block(&extra, &t));
+        // 前后各一空格内边距是 block() 的契约
+        assert_eq!(plain, " $5.4K/20K 27% ");
+    }
+
+    #[test]
+    fn extra_usage_block_non_usd_uses_bracket_prefix() {
+        let extra = ExtraUsage {
+            monthly_limit: 1_500.0,
+            used_credits: 450.0,
+            utilization: 30.0,
+            currency: "EUR".into(),
+        };
+        let plain = strip_ansi(&extra_usage_block(&extra, &Thresholds::default()));
+        assert_eq!(plain, " [EUR] 450/1.5K 30% ");
+    }
+
+    #[test]
+    fn extra_usage_block_color_thresholds() {
+        // 利用率 < yellow_at(80) → 蓝
+        let safe = ExtraUsage {
+            monthly_limit: 100.0,
+            used_credits: 10.0,
+            utilization: 10.0,
+            currency: "USD".into(),
+        };
+        let raw = extra_usage_block(&safe, &Thresholds::default());
+        assert!(raw.contains(&format!("48;5;{BG_QUOTA_SAFE}")));
+
+        // 利用率 >= red_at(90) → 红
+        let danger = ExtraUsage {
+            monthly_limit: 100.0,
+            used_credits: 95.0,
+            utilization: 95.0,
+            currency: "USD".into(),
+        };
+        let raw = extra_usage_block(&danger, &Thresholds::default());
+        assert!(raw.contains(&format!("48;5;{BG_DANGER}")));
+    }
+
+    #[test]
+    fn visible_width_strips_ansi() {
+        let s = format!("{}plain{}", "\x1b[48;5;60m", "\x1b[0m");
+        assert_eq!(visible_width(&s), "plain".chars().count());
+    }
+}

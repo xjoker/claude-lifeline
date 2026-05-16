@@ -141,3 +141,108 @@ fn read_capped(path: &std::path::Path, max_bytes: u64) -> Option<String> {
     f.by_ref().take(max_bytes).read_to_string(&mut buf).ok()?;
     Some(buf)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn debug_redacts_access_token() {
+        let cred = OAuthCredential {
+            access_token: Some("sk-ant-oat-supersecret".into()),
+            subscription_type: Some("max".into()),
+            rate_limit_tier: Some("default_claude_max_20x".into()),
+        };
+        let dump = format!("{cred:?}");
+        assert!(!dump.contains("supersecret"), "token leaked: {dump}");
+        assert!(dump.contains("[REDACTED]"));
+        // 非敏感字段保持可见
+        assert!(dump.contains("max"));
+        assert!(dump.contains("default_claude_max_20x"));
+    }
+
+    #[test]
+    fn deserializes_full_keychain_payload() {
+        let json = r#"{
+            "claudeAiOauth": {
+                "accessToken": "tok",
+                "refreshToken": "rtok",
+                "expiresAt": 1778962420854,
+                "subscriptionType": "max",
+                "rateLimitTier": "default_claude_max_20x"
+            }
+        }"#;
+        let creds: CredentialsFile = serde_json::from_str(json).unwrap();
+        let oauth = creds.claude_ai_oauth.unwrap();
+        assert_eq!(oauth.access_token.as_deref(), Some("tok"));
+        assert_eq!(oauth.subscription_type.as_deref(), Some("max"));
+        assert_eq!(
+            oauth.rate_limit_tier.as_deref(),
+            Some("default_claude_max_20x")
+        );
+    }
+
+    #[test]
+    fn legacy_credentials_without_new_fields() {
+        // 老版本凭证（subscriptionType/rateLimitTier 未写入时）
+        let json = r#"{"claudeAiOauth": {"accessToken": "tok"}}"#;
+        let creds: CredentialsFile = serde_json::from_str(json).unwrap();
+        let oauth = creds.claude_ai_oauth.unwrap();
+        assert!(oauth.subscription_type.is_none());
+        assert!(oauth.rate_limit_tier.is_none());
+    }
+
+    #[test]
+    fn label_prefers_rate_limit_tier() {
+        assert_eq!(
+            subscription_label(Some("max"), Some("default_claude_max_20x")),
+            Some("MAX·20x".into())
+        );
+        assert_eq!(
+            subscription_label(Some("max"), Some("default_claude_max_5x")),
+            Some("MAX·5x".into())
+        );
+        assert_eq!(
+            subscription_label(Some("pro"), Some("default_claude_pro")),
+            Some("PRO".into())
+        );
+    }
+
+    #[test]
+    fn label_falls_back_to_subscription_type_when_tier_missing() {
+        assert_eq!(
+            subscription_label(Some("free"), None),
+            Some("FREE".into())
+        );
+        assert_eq!(subscription_label(Some("max"), Some("")), Some("MAX".into()));
+    }
+
+    #[test]
+    fn label_returns_none_when_both_empty() {
+        assert_eq!(subscription_label(None, None), None);
+        assert_eq!(subscription_label(Some(""), Some("  ")), None);
+    }
+
+    #[test]
+    fn label_handles_unknown_tier_gracefully() {
+        // 新出的 plan 名（如 team / enterprise / 未知）不丢，保留大写
+        assert_eq!(
+            subscription_label(None, Some("default_claude_team")),
+            Some("TEAM".into())
+        );
+        assert_eq!(
+            subscription_label(None, Some("default_claude_enterprise")),
+            Some("ENT".into())
+        );
+        // 完全未知的 plan + multiplier 组合
+        assert_eq!(
+            subscription_label(None, Some("default_claude_galaxy_99x")),
+            Some("GALAXY·99x".into())
+        );
+        // 没有 default_claude_ 前缀也应工作
+        assert_eq!(
+            subscription_label(None, Some("legacy_max_2x")),
+            Some("LEGACY·max".into())
+        );
+    }
+}

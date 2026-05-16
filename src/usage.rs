@@ -501,3 +501,122 @@ async fn fetch_usage_from_api() -> Option<UsageData> {
         extra_usage,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 真实抓包样本（脱敏数值）：所有新字段都解出
+    const FULL_API_RESPONSE: &str = r#"{
+        "five_hour": {"utilization": 6.0, "resets_at": "2026-05-16T17:10:00.239968+00:00"},
+        "seven_day": {"utilization": 1.0, "resets_at": "2026-05-21T21:00:00.239997+00:00"},
+        "seven_day_oauth_apps": null,
+        "seven_day_opus": {"utilization": 12.5, "resets_at": "2026-05-21T21:00:00.240000+00:00"},
+        "seven_day_cowork": null,
+        "seven_day_sonnet": {"utilization": 0.0, "resets_at": "2026-05-21T21:00:00.240010+00:00"},
+        "seven_day_omelette": {"utilization": 0.0, "resets_at": null},
+        "tangelo": null,
+        "iguana_necktie": null,
+        "omelette_promotional": null,
+        "extra_usage": {
+            "is_enabled": true,
+            "monthly_limit": 20000,
+            "used_credits": 5440.0,
+            "utilization": 27.2,
+            "currency": "USD",
+            "disabled_reason": null
+        }
+    }"#;
+
+    #[test]
+    fn deserializes_all_known_fields() {
+        let resp: ApiUsageResponse = serde_json::from_str(FULL_API_RESPONSE).unwrap();
+        assert!(resp.five_hour.is_some());
+        assert!(resp.seven_day_opus.is_some());
+        assert!(resp.extra_usage.is_some());
+
+        let opus = resp.seven_day_opus.unwrap();
+        assert_eq!(opus.utilization, Some(12.5));
+
+        let extra = resp.extra_usage.unwrap();
+        assert!(extra.is_enabled);
+        assert_eq!(extra.monthly_limit, Some(20_000.0));
+        assert_eq!(extra.utilization, Some(27.2));
+        assert_eq!(extra.currency.as_deref(), Some("USD"));
+    }
+
+    #[test]
+    fn extra_usage_disabled_is_dropped_by_filter() {
+        // 模拟 fetch_usage_from_api 内部对 is_enabled 的过滤逻辑：
+        // is_enabled=false 时即使其他字段有值也应丢弃
+        let api = ApiExtraUsage {
+            is_enabled: false,
+            monthly_limit: Some(20_000.0),
+            used_credits: Some(0.0),
+            utilization: Some(0.0),
+            currency: Some("USD".into()),
+        };
+        let kept = if !api.is_enabled {
+            None
+        } else {
+            Some(ExtraUsage {
+                monthly_limit: api.monthly_limit.unwrap_or(0.0),
+                used_credits: api.used_credits.unwrap_or(0.0),
+                utilization: api.utilization.unwrap_or(0.0),
+                currency: api.currency.unwrap_or_else(|| "USD".into()),
+            })
+        };
+        assert!(kept.is_none());
+    }
+
+    #[test]
+    fn legacy_api_without_new_fields_still_parses() {
+        // 模拟 API 老版本响应（无 opus / extra_usage 字段）
+        let json = r#"{
+            "five_hour": {"utilization": 50.0, "resets_at": "2026-05-16T17:10:00+00:00"},
+            "seven_day": {"utilization": 30.0, "resets_at": "2026-05-21T21:00:00+00:00"},
+            "seven_day_sonnet": null
+        }"#;
+        let resp: ApiUsageResponse = serde_json::from_str(json).unwrap();
+        assert!(resp.seven_day_opus.is_none());
+        assert!(resp.extra_usage.is_none());
+    }
+
+    #[test]
+    fn cached_usage_legacy_round_trip() {
+        // 老缓存文件（pre-0.3.0）应能反序列化为新结构，新字段为 None
+        let legacy_cache = r#"{
+            "five_hour_pct": 50.0,
+            "five_hour_resets_at": "2026-05-16T17:10:00+00:00",
+            "seven_day_pct": 30.0,
+            "seven_day_resets_at": "2026-05-21T21:00:00+00:00"
+        }"#;
+        let cached: CachedUsage = serde_json::from_str(legacy_cache).unwrap();
+        assert!(cached.seven_day_opus_pct.is_none());
+        assert!(cached.extra_usage.is_none());
+        // sonnet 字段在 0.2.0 也存在过，所以也应为 None
+        assert!(cached.seven_day_sonnet_pct.is_none());
+    }
+
+    #[test]
+    fn cached_extra_usage_round_trip() {
+        let extra = ExtraUsage {
+            monthly_limit: 20_000.0,
+            used_credits: 5_440.0,
+            utilization: 27.2,
+            currency: "USD".into(),
+        };
+        let cached = CachedExtraUsage {
+            monthly_limit: extra.monthly_limit,
+            used_credits: extra.used_credits,
+            utilization: extra.utilization,
+            currency: extra.currency.clone(),
+        };
+        let json = serde_json::to_string(&cached).unwrap();
+        let back: CachedExtraUsage = serde_json::from_str(&json).unwrap();
+        let restored = extra_from_cache(&back);
+        assert_eq!(restored.monthly_limit, 20_000.0);
+        assert_eq!(restored.utilization, 27.2);
+        assert_eq!(restored.currency, "USD");
+    }
+}
