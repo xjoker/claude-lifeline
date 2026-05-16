@@ -193,6 +193,77 @@ fn pick_asset<'a>(release: &'a Release) -> Option<&'a ReleaseAsset> {
     })
 }
 
+/// Locate a `SHA256SUMS` asset in the release. Older releases (<0.4.0) lack one —
+/// callers handle the `None` case by emitting a warning so the user knows what trust
+/// they're extending; mismatch / missing-entry on a release that *does* ship checksums
+/// remains a hard abort.
+fn find_checksums_asset(release: &Release) -> Option<&ReleaseAsset> {
+    release
+        .assets
+        .iter()
+        .find(|a| a.name.eq_ignore_ascii_case("SHA256SUMS"))
+}
+
+async fn fetch_checksums(asset: &ReleaseAsset) -> anyhow::Result<String> {
+    // Cap at 1 MiB — a real SHA256SUMS for our release matrix is well under 1 KiB;
+    // anything larger is either malicious or accidentally pointing at a binary.
+    const MAX: u64 = 1_024 * 1_024;
+    if asset.size > MAX {
+        anyhow::bail!("SHA256SUMS size {} exceeds 1 MiB cap", asset.size);
+    }
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()?;
+    let resp = client
+        .get(&asset.browser_download_url)
+        .header("User-Agent", "claude-lifeline")
+        .send()
+        .await?
+        .error_for_status()?;
+    let bytes = resp.bytes().await?;
+    if bytes.len() as u64 > MAX {
+        anyhow::bail!("SHA256SUMS body exceeded 1 MiB cap");
+    }
+    Ok(String::from_utf8(bytes.to_vec())?)
+}
+
+/// Parse the `sha256sum`-style file and look up the digest for `asset_name`.
+/// Each line is `<64-hex-digest>  <filename>` (two spaces between fields). Supports
+/// the GNU binary-mode `*filename` form and ignores comment / blank lines.
+fn lookup_checksum(checksums: &str, asset_name: &str) -> Option<String> {
+    for line in checksums.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let mut parts = line.splitn(2, char::is_whitespace);
+        let digest = parts.next()?.trim();
+        let name = parts.next()?.trim_start_matches('*').trim();
+        if name == asset_name && digest.len() == 64 && digest.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Some(digest.to_ascii_lowercase());
+        }
+    }
+    None
+}
+
+/// SHA-256 a file on disk via the `sha2` crate. Buffered to avoid loading the
+/// whole binary into RAM.
+fn sha256_file(path: &std::path::Path) -> anyhow::Result<String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+    let mut file = std::fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let n = file.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Ok(hex::encode(hasher.finalize()))
+}
+
 fn platform_asset_patterns() -> Vec<&'static str> {
     let os = std::env::consts::OS;
     let arch = std::env::consts::ARCH;
@@ -275,6 +346,92 @@ fn install_binary(downloaded: &std::path::Path, target: &std::path::Path) -> any
     }
 }
 
+/// SHA-256 verification. Returns Ok on either a successful match or "no SHA256SUMS in
+/// release" (with a stderr warning so the user sees the degraded trust). Returns Err
+/// only on mismatch / missing-entry / fetch failure — all of which must abort.
+async fn verify_download(
+    release: &Release,
+    downloaded: &std::path::Path,
+    asset_name: &str,
+) -> anyhow::Result<()> {
+    let Some(checksums_asset) = find_checksums_asset(release) else {
+        eprintln!(
+            "warning: this release has no SHA256SUMS file — proceeding with HTTPS trust only. \
+             Future releases will include checksums."
+        );
+        return Ok(());
+    };
+
+    let checksums = fetch_checksums(checksums_asset)
+        .await
+        .map_err(|e| anyhow::anyhow!("failed to fetch SHA256SUMS: {e}"))?;
+
+    let expected = lookup_checksum(&checksums, asset_name).ok_or_else(|| {
+        anyhow::anyhow!(
+            "SHA256SUMS does not contain an entry for {asset_name} — refusing to install"
+        )
+    })?;
+
+    // Hashing a few-MB file is fast enough that we don't bother with spawn_blocking.
+    let actual = sha256_file(downloaded)?;
+    if actual.to_ascii_lowercase() != expected {
+        anyhow::bail!("SHA-256 mismatch for {asset_name}: expected {expected}, got {actual}");
+    }
+    println!("Verified SHA-256 ({} = {})", asset_name, &expected[..16]);
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lookup_checksum_matches_exact_filename() {
+        let body = "\
+abc123def456abc123def456abc123def456abc123def456abc123def456abcd  claude-lifeline-aarch64-apple-darwin
+111122223333111122223333111122223333111122223333111122223333ffff  claude-lifeline-x86_64-unknown-linux-musl
+";
+        let got = lookup_checksum(body, "claude-lifeline-aarch64-apple-darwin").unwrap();
+        assert_eq!(got, "abc123def456abc123def456abc123def456abc123def456abc123def456abcd");
+    }
+
+    #[test]
+    fn lookup_checksum_rejects_invalid_digest() {
+        // Wrong length — defends against a malformed/truncated SHA256SUMS that could
+        // be silently accepted otherwise
+        let body = "deadbeef  claude-lifeline-aarch64-apple-darwin\n";
+        assert!(lookup_checksum(body, "claude-lifeline-aarch64-apple-darwin").is_none());
+    }
+
+    #[test]
+    fn lookup_checksum_handles_binary_marker() {
+        // GNU sha256sum may emit `* filename` for binary mode
+        let body = "\
+abc123def456abc123def456abc123def456abc123def456abc123def456abcd *claude-lifeline-x86_64-pc-windows-msvc.exe
+";
+        assert_eq!(
+            lookup_checksum(body, "claude-lifeline-x86_64-pc-windows-msvc.exe"),
+            Some("abc123def456abc123def456abc123def456abc123def456abc123def456abcd".into())
+        );
+    }
+
+    #[test]
+    fn lookup_checksum_ignores_comments_and_blank_lines() {
+        let body = "\
+# generated 2026-05-16
+
+abc123def456abc123def456abc123def456abc123def456abc123def456abcd  claude-lifeline-aarch64-apple-darwin
+";
+        assert!(lookup_checksum(body, "claude-lifeline-aarch64-apple-darwin").is_some());
+    }
+
+    #[test]
+    fn lookup_checksum_returns_none_for_missing_entry() {
+        let body = "abc123def456abc123def456abc123def456abc123def456abc123def456abcd  other-binary\n";
+        assert!(lookup_checksum(body, "claude-lifeline-aarch64-apple-darwin").is_none());
+    }
+}
+
 pub mod cli {
     use crate::cli::UpdateAction;
 
@@ -325,6 +482,16 @@ pub mod cli {
         let parent = exe.parent().ok_or_else(|| anyhow::anyhow!("cannot resolve parent of current_exe"))?;
         let temp = parent.join(format!(".claude-lifeline.{}.download", std::process::id()));
         super::download_to(&temp, asset).await?;
+
+        // Verify SHA-256 before doing anything else with the file. A failed verification
+        // aborts the upgrade; we leave the temp file in place only long enough to delete
+        // it, never copy it into position. Check is best-effort: older releases lack
+        // SHA256SUMS — we print a warning and let the user decide whether to continue.
+        if let Err(e) = super::verify_download(&release, &temp, &asset.name).await {
+            let _ = std::fs::remove_file(&temp);
+            return Err(e);
+        }
+
         super::make_executable(&temp)?;
 
         println!("Installing → {}", exe.display());

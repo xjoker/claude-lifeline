@@ -45,6 +45,14 @@ without modification.
   `data::paths::*` helpers so every consumer (statusline, TUI, doctor)
   resolves the same `~/.claude/claude-lifeline/` root.
 
+### Security
+- **Release artifacts are now checksummed.** `release.yml` writes a
+  `SHA256SUMS` file alongside the platform binaries, and
+  `claude-lifeline update run` fetches it before installing — abort on
+  mismatch, abort on missing entry, warn-and-continue if a release lacks
+  the file entirely (kept for backwards compatibility with pre-0.4.0
+  releases).
+
 ### Notes
 - The legacy hidden flag `--check-update` is preserved for the
   background self-spawn used by the statusline path.

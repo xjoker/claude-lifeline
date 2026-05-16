@@ -298,8 +298,9 @@ claude-lifeline config init       # Seed config.toml from defaults
 
 claude-lifeline update check      # Compare local version to GitHub release
 claude-lifeline update run        # Download and atomically replace the
-                                  # running binary with the latest release
-                                  # asset for this platform
+                                  # running binary; verifies SHA256SUMS
+                                  # before swap (warns if a release has
+                                  # none — back-compat with pre-0.4.0)
 
 claude-lifeline doctor            # Diagnostic report: PATH, data dir,
                                   # credentials, transcript count, and
