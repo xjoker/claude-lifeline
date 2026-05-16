@@ -10,6 +10,10 @@ pub struct UsageData {
     pub seven_day: Option<WindowUsage>,
     /// Sonnet 专属 7d 额度（来自 API 的 seven_day_sonnet 字段）
     pub seven_day_sonnet: Option<WindowUsage>,
+    /// Opus 专属 7d 额度（来自 API 的 seven_day_opus 字段；未跑 Opus 时 API 返回 null）
+    pub seven_day_opus: Option<WindowUsage>,
+    /// 月度付费扩容池（按需开启；is_enabled=false 或 API 缺失时为 None）
+    pub extra_usage: Option<ExtraUsage>,
 }
 
 #[derive(Debug, Clone)]
@@ -18,6 +22,19 @@ pub struct WindowUsage {
     pub used_percent: f64,
     /// 重置时间（UTC ISO 字符串）
     pub resets_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// 月度付费扩容池数据（来自 API extra_usage 节点）
+#[derive(Debug, Clone)]
+pub struct ExtraUsage {
+    /// 月度上限（货币单位由 currency 决定，目前观测仅 "USD"）
+    pub monthly_limit: f64,
+    /// 已用额度
+    pub used_credits: f64,
+    /// 利用率 0-100；与 used/limit 之比一致，由 API 直接给出
+    pub utilization: f64,
+    /// 货币代码（"USD" 等）
+    pub currency: String,
 }
 
 /// 配速数据
@@ -61,6 +78,20 @@ struct CachedUsage {
     seven_day_sonnet_pct: Option<f64>,
     #[serde(default)]
     seven_day_sonnet_resets_at: Option<String>,
+    #[serde(default)]
+    seven_day_opus_pct: Option<f64>,
+    #[serde(default)]
+    seven_day_opus_resets_at: Option<String>,
+    #[serde(default)]
+    extra_usage: Option<CachedExtraUsage>,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct CachedExtraUsage {
+    monthly_limit: f64,
+    used_credits: f64,
+    utilization: f64,
+    currency: String,
 }
 
 // ── API 响应结构 ──
@@ -70,12 +101,31 @@ struct ApiUsageResponse {
     five_hour: Option<ApiWindow>,
     seven_day: Option<ApiWindow>,
     seven_day_sonnet: Option<ApiWindow>,
+    #[serde(default)]
+    seven_day_opus: Option<ApiWindow>,
+    #[serde(default)]
+    extra_usage: Option<ApiExtraUsage>,
 }
 
 #[derive(Debug, Deserialize)]
 struct ApiWindow {
     utilization: Option<f64>,
     resets_at: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ApiExtraUsage {
+    /// API 用 is_enabled 标记扩容池是否激活；false 时其他字段无意义
+    #[serde(default)]
+    is_enabled: bool,
+    #[serde(default)]
+    monthly_limit: Option<f64>,
+    #[serde(default)]
+    used_credits: Option<f64>,
+    #[serde(default)]
+    utilization: Option<f64>,
+    #[serde(default)]
+    currency: Option<String>,
 }
 
 // ── 辅助：解析 resets_at（兼容 Unix 时间戳和 ISO 字符串） ──
@@ -127,16 +177,20 @@ pub async fn get_usage_data(rate_limits: Option<&RateLimits>) -> UsageData {
 
         let has_data = five_hour.is_some() || seven_day.is_some();
         if has_data {
-            // rate_limits 无 per-model 字段，保留缓存里已有的 sonnet 数据。
-            // sonnet 窗口的有效性单独判定 —— 不能因 5h 窗口刚 reset 就丢掉仍然新鲜的 sonnet
-            let seven_day_sonnet = read_cache()
-                .await
-                .filter(cache_within_ttl)
-                .and_then(|c| sonnet_from_cache(&c.data));
+            // rate_limits 无 per-model / extra_usage 字段，保留缓存里已有的数据。
+            // 每个子字段的有效性独立判定 —— 不能因 5h 窗口刚 reset 就丢掉仍然新鲜的副窗口
+            let cache = read_cache().await.filter(cache_within_ttl);
+            let seven_day_sonnet = cache.as_ref().and_then(|c| sonnet_from_cache(&c.data));
+            let seven_day_opus = cache.as_ref().and_then(|c| opus_from_cache(&c.data));
+            let extra_usage = cache
+                .as_ref()
+                .and_then(|c| c.data.extra_usage.as_ref().map(extra_from_cache));
             let usage = UsageData {
                 five_hour,
                 seven_day,
                 seven_day_sonnet,
+                seven_day_opus,
+                extra_usage,
             };
             write_cache(&usage).await;
             return usage;
@@ -163,6 +217,8 @@ pub async fn get_usage_data(rate_limits: Option<&RateLimits>) -> UsageData {
         five_hour: None,
         seven_day: None,
         seven_day_sonnet: None,
+        seven_day_opus: None,
+        extra_usage: None,
     }
 }
 
@@ -277,6 +333,17 @@ async fn write_cache(data: &UsageData) {
             .seven_day_sonnet
             .as_ref()
             .and_then(|w| w.resets_at.map(|dt| dt.to_rfc3339())),
+        seven_day_opus_pct: data.seven_day_opus.as_ref().map(|w| w.used_percent),
+        seven_day_opus_resets_at: data
+            .seven_day_opus
+            .as_ref()
+            .and_then(|w| w.resets_at.map(|dt| dt.to_rfc3339())),
+        extra_usage: data.extra_usage.as_ref().map(|e| CachedExtraUsage {
+            monthly_limit: e.monthly_limit,
+            used_credits: e.used_credits,
+            utilization: e.utilization,
+            currency: e.currency.clone(),
+        }),
     };
 
     let cache_file = CacheFile {
@@ -318,6 +385,22 @@ fn sonnet_from_cache(cached: &CachedUsage) -> Option<WindowUsage> {
     )
 }
 
+fn opus_from_cache(cached: &CachedUsage) -> Option<WindowUsage> {
+    window_from_cache(
+        cached.seven_day_opus_pct,
+        cached.seven_day_opus_resets_at.as_deref(),
+    )
+}
+
+fn extra_from_cache(cached: &CachedExtraUsage) -> ExtraUsage {
+    ExtraUsage {
+        monthly_limit: cached.monthly_limit,
+        used_credits: cached.used_credits,
+        utilization: cached.utilization,
+        currency: cached.currency.clone(),
+    }
+}
+
 /// 从 CachedUsage 转换为 UsageData
 fn cached_to_usage(cached: &CachedUsage) -> UsageData {
     UsageData {
@@ -330,6 +413,8 @@ fn cached_to_usage(cached: &CachedUsage) -> UsageData {
             cached.seven_day_resets_at.as_deref(),
         ),
         seven_day_sonnet: sonnet_from_cache(cached),
+        seven_day_opus: opus_from_cache(cached),
+        extra_usage: cached.extra_usage.as_ref().map(extra_from_cache),
     }
 }
 
@@ -385,9 +470,34 @@ async fn fetch_usage_from_api() -> Option<UsageData> {
             .map(|dt| dt.with_timezone(&Utc)),
     });
 
+    let seven_day_opus = api_resp.seven_day_opus.map(|w| WindowUsage {
+        used_percent: w.utilization.unwrap_or(0.0),
+        resets_at: w
+            .resets_at
+            .as_deref()
+            .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+            .map(|dt| dt.with_timezone(&Utc)),
+    });
+
+    let extra_usage = api_resp.extra_usage.and_then(|e| {
+        // is_enabled=false 时 monthly_limit/used_credits 字段可能仍存在，
+        // 但语义上扩容池没开通；丢弃以避免误展示
+        if !e.is_enabled {
+            return None;
+        }
+        Some(ExtraUsage {
+            monthly_limit: e.monthly_limit.unwrap_or(0.0),
+            used_credits: e.used_credits.unwrap_or(0.0),
+            utilization: e.utilization.unwrap_or(0.0),
+            currency: e.currency.unwrap_or_else(|| "USD".to_string()),
+        })
+    });
+
     Some(UsageData {
         five_hour,
         seven_day,
         seven_day_sonnet,
+        seven_day_opus,
+        extra_usage,
     })
 }
