@@ -34,45 +34,71 @@ impl fmt::Debug for OAuthCredential {
     }
 }
 
+/// 订阅标签的最大显示宽度（字符数；ASCII 字符按 1 列估算）。
+/// 防御外部字段被异常拉长撑爆 subscription 块；常见标签 `MAX·20x` 才 7 字符
+const SUBSCRIPTION_LABEL_MAX_CHARS: usize = 16;
+
 /// 把 (subscription_type, rate_limit_tier) 解析为状态栏紧凑标签。
 ///
 /// 优先级：rate_limit_tier > subscription_type。两者都缺返回 None。
 ///
 /// 已观测到的速率档命名规律（Anthropic 公开 OAuth 字段，2026-05）：
-///   `default_claude_<plan>` 或 `default_claude_<plan>_<multiplier>`
-/// 解析时取末段，识别 `max_20x`/`max_5x`/`pro` 等；未知值大写降级处理。
+///   `default_claude_<plan>` 或 `default_claude_<plan>_<multiplier>` 或更长
+/// 解析时识别已知 plan（max/pro/free/team/enterprise），用 `·` 拼接剩余段；
+/// 未知 plan 大写降级、保留所有段。所有出口统一截断至 `SUBSCRIPTION_LABEL_MAX_CHARS`
+/// 防御 API 异常返回（含控制字符的字符也由 `to_ascii_uppercase` 自然保留位置但不破坏
+/// ANSI 输出 —— 渲染层进一步过滤）
 pub fn subscription_label(
     subscription_type: Option<&str>,
     rate_limit_tier: Option<&str>,
 ) -> Option<String> {
-    if let Some(tier) = rate_limit_tier.map(str::trim).filter(|s| !s.is_empty()) {
-        if let Some(label) = parse_rate_limit_tier(tier) {
-            return Some(label);
-        }
-    }
-    subscription_type
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_ascii_uppercase())
+    let raw = if let Some(tier) = rate_limit_tier.map(str::trim).filter(|s| !s.is_empty()) {
+        parse_rate_limit_tier(tier).or_else(|| {
+            subscription_type
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_ascii_uppercase())
+        })?
+    } else {
+        subscription_type
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_ascii_uppercase())?
+    };
+    Some(truncate_label(&raw, SUBSCRIPTION_LABEL_MAX_CHARS))
 }
 
 fn parse_rate_limit_tier(tier: &str) -> Option<String> {
     let suffix = tier.strip_prefix("default_claude_").unwrap_or(tier);
-    let mut parts = suffix.split('_');
-    let plan = parts.next()?;
-    let multiplier = parts.next();
-    let label = match (plan, multiplier) {
-        ("max", Some(m)) => format!("MAX·{m}"),
-        ("max", None) => "MAX".to_string(),
-        ("pro", _) => "PRO".to_string(),
-        ("free", _) => "FREE".to_string(),
-        ("team", _) => "TEAM".to_string(),
-        ("enterprise", _) => "ENT".to_string(),
-        // 未识别 plan：保留原始 tier 末段大写，避免吞掉新枚举值
-        (other, Some(m)) => format!("{}·{}", other.to_ascii_uppercase(), m),
-        (other, None) => other.to_ascii_uppercase(),
+    let parts: Vec<&str> = suffix.split('_').filter(|s| !s.is_empty()).collect();
+    let (plan, rest) = parts.split_first()?;
+    let label = match *plan {
+        "max" if rest.is_empty() => "MAX".to_string(),
+        "max" => format!("MAX·{}", rest.join("·")),
+        "pro" => "PRO".to_string(),
+        "free" => "FREE".to_string(),
+        "team" => "TEAM".to_string(),
+        "enterprise" => "ENT".to_string(),
+        // 未识别 plan：保留所有段，第一段大写做"plan name"提示，其它段保留原 case
+        // 避免吞掉未来 Anthropic 引入的 multi-segment 命名（如 `enterprise_premium_50x`）
+        _ if rest.is_empty() => plan.to_ascii_uppercase(),
+        _ => format!("{}·{}", plan.to_ascii_uppercase(), rest.join("·")),
     };
     Some(label)
+}
+
+/// 按字符数截断（非字节）。用于 ASCII / 单字节 label；如果未来引入 CJK label
+/// 需要切换到视觉宽度截断（见 render::truncate_visual）
+fn truncate_label(s: &str, max_chars: usize) -> String {
+    let count = s.chars().count();
+    if count <= max_chars {
+        return s.to_string();
+    }
+    // 留 2 列给 `..` 提示
+    let keep = max_chars.saturating_sub(2);
+    let mut out: String = s.chars().take(keep).collect();
+    out.push_str("..");
+    out
 }
 
 impl fmt::Debug for CredentialsFile {
@@ -239,10 +265,44 @@ mod tests {
             subscription_label(None, Some("default_claude_galaxy_99x")),
             Some("GALAXY·99x".into())
         );
-        // 没有 default_claude_ 前缀也应工作
+        // 没有 default_claude_ 前缀也应工作，且所有段保留（修复原 LEGACY·max 丢段问题）
         assert_eq!(
             subscription_label(None, Some("legacy_max_2x")),
-            Some("LEGACY·max".into())
+            Some("LEGACY·max·2x".into())
         );
+    }
+
+    #[test]
+    fn label_preserves_multi_segment_known_plan() {
+        // 已知 plan + 多段后缀（防御未来命名扩展），所有段保留，不再丢尾段
+        assert_eq!(
+            subscription_label(None, Some("default_claude_max_5x_beta")),
+            Some("MAX·5x·beta".into())
+        );
+        // 单 plan 无后缀的几种形式都应稳定输出
+        assert_eq!(
+            subscription_label(None, Some("default_claude_max")),
+            Some("MAX".into())
+        );
+        // 超过 16 字符的合法 label 由长度守卫截断 + `..` 收尾 —— 验证
+        // 多段保留与长度守卫两个机制叠加后的行为
+        let long_known = subscription_label(None, Some("default_claude_max_enterprise_20x"))
+            .expect("label parses");
+        assert!(long_known.starts_with("MAX·enterprise"));
+        assert!(long_known.ends_with(".."));
+        assert!(long_known.chars().count() <= 16);
+    }
+
+    #[test]
+    fn label_is_length_bounded() {
+        // 模拟 API 返回异常长的 tier 字符串：截断到 16 字符并加 ".."
+        let long_tier = format!("default_claude_max_{}", "x".repeat(200));
+        let label = subscription_label(None, Some(&long_tier)).unwrap();
+        assert!(label.chars().count() <= 16, "label too long: {label}");
+        assert!(label.ends_with(".."));
+        // subscription_type fallback 也应受限
+        let long_sub = "x".repeat(200);
+        let label = subscription_label(Some(&long_sub), None).unwrap();
+        assert!(label.chars().count() <= 16);
     }
 }
