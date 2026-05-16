@@ -10,6 +10,13 @@ All notable changes to claude-lifeline will be documented in this file.
   (`projects/`, `claude-lifeline/`, `.credentials.json`) re-roots there.
   Whitespace-only values fall back to the `~/.claude` default. `doctor` reports
   the resolved root and flags when the override is in effect.
+- **`--json` output mode** — `claude-lifeline --json` (or
+  `claude-lifeline statusline --json`) emits a structured JSON snapshot of the
+  same data the ANSI line would render. Schema is stable and versioned
+  (`schema_version: 1`); new fields are additive so consumers don't have to
+  re-parse on every release. Useful for tmux status lines, IDE prompt
+  segments, or scripts that want to act on `pace.direction == "over"` or
+  `quotas.five_hour.pace.depletion_eta`.
 
 ### Changed
 - **TUI scope narrowed.** The Sessions and Usage tabs added in 0.4.0 have been

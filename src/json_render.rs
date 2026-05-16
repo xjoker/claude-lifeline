@@ -1,0 +1,272 @@
+//! `--json` output mode for the statusline path.
+//!
+//! Schema is stable and versioned via `schema_version`. New fields must be additive so
+//! existing consumers keep working without code changes; bump `schema_version` only
+//! when an existing field's meaning changes or a required field is removed.
+//!
+//! Today only `schema_version: 1` exists.
+
+use serde_json::{json, Value};
+
+use crate::config::Thresholds;
+use crate::render::RenderContext;
+use crate::usage::{PaceDirection, PaceInfo, WindowUsage};
+
+pub fn build(ctx: &RenderContext) -> Value {
+    let model_name = crate::input::get_model_name(&ctx.stdin);
+    let project = project_value(ctx);
+    let git = git_value(&ctx.git);
+    let edits = edits_value(&ctx.stdin);
+    let context = context_value(ctx);
+    let quotas = quotas_value(ctx);
+    let subscription = subscription_value(ctx);
+    let extra_usage = extra_usage_value(ctx);
+
+    json!({
+        "schema_version": 1,
+        "lifeline_version": env!("CARGO_PKG_VERSION"),
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "model": {
+            "display_name": model_name,
+            "tier": model_tier(&model_name),
+        },
+        "project": project,
+        "git": git,
+        "edits": edits,
+        "context": context,
+        "quotas": quotas,
+        "subscription": subscription,
+        "extra_usage": extra_usage,
+        "update_hint": ctx.update_hint,
+    })
+}
+
+fn model_tier(display_name: &str) -> &'static str {
+    if display_name.contains("Opus") {
+        "opus"
+    } else if display_name.contains("Sonnet") {
+        "sonnet"
+    } else if display_name.contains("Haiku") {
+        "haiku"
+    } else {
+        "other"
+    }
+}
+
+fn project_value(ctx: &RenderContext) -> Value {
+    let cwd = ctx
+        .stdin
+        .cwd
+        .as_deref()
+        .or_else(|| {
+            ctx.stdin
+                .workspace
+                .as_ref()
+                .and_then(|w| w.current_dir.as_deref())
+        });
+    let name = cwd
+        .and_then(|p| std::path::Path::new(p).file_name())
+        .and_then(|n| n.to_str());
+    json!({
+        "cwd": cwd,
+        "name": name,
+    })
+}
+
+fn git_value(git: &crate::git::GitInfo) -> Value {
+    json!({
+        "branch": git.branch,
+        "dirty": git.is_dirty,
+        "ahead": git.ahead,
+        "behind": git.behind,
+    })
+}
+
+fn edits_value(stdin: &crate::input::StdinData) -> Value {
+    let cost = stdin.cost.as_ref();
+    let added = cost.and_then(|c| c.total_lines_added).unwrap_or(0);
+    let removed = cost.and_then(|c| c.total_lines_removed).unwrap_or(0);
+    json!({
+        "added": added,
+        "removed": removed,
+    })
+}
+
+fn context_value(ctx: &RenderContext) -> Value {
+    let pct = crate::input::get_context_percent(&ctx.stdin);
+    let t = &ctx.config.thresholds;
+    let level = if pct >= t.ctx_red_at {
+        "red"
+    } else if pct >= t.ctx_yellow_at {
+        "yellow"
+    } else {
+        "green"
+    };
+    json!({
+        "used_percent": pct,
+        "level": level,
+    })
+}
+
+fn quotas_value(ctx: &RenderContext) -> Value {
+    let t = &ctx.config.thresholds;
+    json!({
+        "five_hour": quota_window(
+            ctx.usage.five_hour.as_ref(),
+            crate::usage::WINDOW_5H_SECS,
+            t.five_hour_yellow_at,
+            t.five_hour_red_at,
+            t.pace_tolerance,
+        ),
+        "seven_day": quota_window(
+            ctx.usage.seven_day.as_ref(),
+            crate::usage::WINDOW_7D_SECS,
+            t.seven_day_yellow_at,
+            t.seven_day_red_at,
+            t.pace_tolerance,
+        ),
+        "seven_day_sonnet": quota_window(
+            ctx.usage.seven_day_sonnet.as_ref(),
+            crate::usage::WINDOW_7D_SECS,
+            t.seven_day_yellow_at,
+            t.seven_day_red_at,
+            t.pace_tolerance,
+        ),
+        "seven_day_opus": quota_window(
+            ctx.usage.seven_day_opus.as_ref(),
+            crate::usage::WINDOW_7D_SECS,
+            t.seven_day_yellow_at,
+            t.seven_day_red_at,
+            t.pace_tolerance,
+        ),
+    })
+}
+
+fn quota_window(
+    window: Option<&WindowUsage>,
+    window_secs: i64,
+    yellow_at: f64,
+    red_at: f64,
+    pace_tolerance: f64,
+) -> Value {
+    let Some(w) = window else {
+        return Value::Null;
+    };
+    let pace = crate::usage::calc_pace(w, window_secs, pace_tolerance);
+    let level = quota_level(w.used_percent, pace.as_ref(), yellow_at, red_at);
+    json!({
+        "used_percent": w.used_percent,
+        "resets_at": w.resets_at.map(|t| t.to_rfc3339()),
+        "pace": pace_value(pace.as_ref()),
+        "level": level,
+    })
+}
+
+fn pace_value(pace: Option<&PaceInfo>) -> Value {
+    let Some(p) = pace else {
+        return Value::Null;
+    };
+    let direction = match p.direction {
+        PaceDirection::Over => "over",
+        PaceDirection::Under => "under",
+        PaceDirection::Normal => "normal",
+    };
+    json!({
+        "pace_percent": p.pace_percent,
+        "direction": direction,
+        "depletion_eta": p.depletion_eta.map(|t| t.to_rfc3339()),
+        "recovery_secs": p.recovery_secs,
+    })
+}
+
+fn quota_level(
+    used: f64,
+    pace: Option<&PaceInfo>,
+    yellow_at: f64,
+    red_at: f64,
+) -> &'static str {
+    let over = pace.is_some_and(|p| p.direction == PaceDirection::Over);
+    if used >= red_at {
+        "red"
+    } else if over || used >= yellow_at {
+        "yellow"
+    } else {
+        "blue"
+    }
+}
+
+fn subscription_value(ctx: &RenderContext) -> Value {
+    if !ctx.config.display.subscription {
+        return Value::Null;
+    }
+    let Some(cred) = crate::auth::read_credentials() else {
+        return Value::Null;
+    };
+    let label = crate::auth::subscription_label(
+        cred.subscription_type.as_deref(),
+        cred.rate_limit_tier.as_deref(),
+    );
+    match label {
+        Some(l) => json!({
+            "label": l,
+            "subscription_type": cred.subscription_type,
+            "rate_limit_tier": cred.rate_limit_tier,
+        }),
+        None => Value::Null,
+    }
+}
+
+fn extra_usage_value(ctx: &RenderContext) -> Value {
+    let Some(extra) = ctx.usage.extra_usage.as_ref() else {
+        return Value::Null;
+    };
+    let t = &ctx.config.thresholds;
+    json!({
+        "monthly_limit": extra.monthly_limit,
+        "used_credits": extra.used_credits,
+        "utilization": extra.utilization,
+        "currency": extra.currency,
+        "level": quota_level_for_extra(extra.utilization, t),
+    })
+}
+
+fn quota_level_for_extra(util: f64, t: &Thresholds) -> &'static str {
+    if util >= t.seven_day_red_at {
+        "red"
+    } else if util >= t.seven_day_yellow_at {
+        "yellow"
+    } else {
+        "blue"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn model_tier_classification() {
+        assert_eq!(model_tier("Opus 4.7 1M"), "opus");
+        assert_eq!(model_tier("Sonnet 4.6"), "sonnet");
+        assert_eq!(model_tier("Haiku 4.5"), "haiku");
+        assert_eq!(model_tier("GLM-4.5"), "other");
+    }
+
+    #[test]
+    fn quota_level_thresholds() {
+        // Below yellow + on pace → blue
+        assert_eq!(quota_level(50.0, None, 75.0, 90.0), "blue");
+        // Below yellow but over pace → yellow (defensive — quota too soon)
+        let over = PaceInfo {
+            pace_percent: 10.0,
+            direction: PaceDirection::Over,
+            depletion_eta: None,
+            recovery_secs: Some(60),
+        };
+        assert_eq!(quota_level(50.0, Some(&over), 75.0, 90.0), "yellow");
+        // Above yellow regardless of pace → yellow
+        assert_eq!(quota_level(80.0, None, 75.0, 90.0), "yellow");
+        // Above red regardless → red
+        assert_eq!(quota_level(95.0, None, 75.0, 90.0), "red");
+    }
+}

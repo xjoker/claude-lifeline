@@ -13,6 +13,11 @@ pub struct Cli {
     #[arg(long, hide = true)]
     pub check_update: bool,
 
+    /// Emit a JSON snapshot instead of the ANSI status line. Only meaningful for the
+    /// default (statusline) command. Stable schema, versioned via `schema_version`.
+    #[arg(long, global = true)]
+    pub json: bool,
+
     #[command(subcommand)]
     pub command: Option<Commands>,
 }
@@ -68,8 +73,9 @@ pub enum UpdateAction {
 }
 
 pub async fn dispatch(cli: Cli) -> anyhow::Result<()> {
+    let json = cli.json;
     match cli.command {
-        None | Some(Commands::Statusline) => statusline_run().await,
+        None | Some(Commands::Statusline) => statusline_run(json).await,
         Some(Commands::Tui) => crate::tui::run().await,
         Some(Commands::Config { action }) => {
             crate::config::cli::run(action.unwrap_or(ConfigAction::Show)).await
@@ -83,14 +89,14 @@ pub async fn dispatch(cli: Cli) -> anyhow::Result<()> {
 }
 
 /// Original statusline flow. Errors are swallowed (status line must never write to user terminal).
-async fn statusline_run() -> anyhow::Result<()> {
-    if let Err(e) = statusline_run_inner().await {
+async fn statusline_run(json: bool) -> anyhow::Result<()> {
+    if let Err(e) = statusline_run_inner(json).await {
         eprintln!("claude-lifeline statusline: {e}");
     }
     Ok(())
 }
 
-async fn statusline_run_inner() -> anyhow::Result<()> {
+async fn statusline_run_inner(json: bool) -> anyhow::Result<()> {
     let stdin = crate::input::read_stdin().await?;
 
     let cwd = stdin
@@ -113,6 +119,10 @@ async fn statusline_run_inner() -> anyhow::Result<()> {
     crate::update::ensure_cache_exists();
 
     let ctx = crate::render::RenderContext { stdin, git, usage, config, update_hint };
-    crate::render::render(&ctx);
+    if json {
+        crate::render::render_json(&ctx);
+    } else {
+        crate::render::render(&ctx);
+    }
     Ok(())
 }

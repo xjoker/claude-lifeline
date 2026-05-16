@@ -295,6 +295,14 @@ The default invocation (no arguments — what Claude Code uses) renders the stat
 line from stdin. The same binary also exposes a small set of utility commands:
 
 ```bash
+claude-lifeline --json            # Emit a structured JSON snapshot of the
+                                  # same data the ANSI line would render.
+                                  # Stable schema (schema_version=1) covering
+                                  # model / project / git / context / quotas
+                                  # (with pace+ETA+recovery) / subscription /
+                                  # extra_usage / update_hint.
+                                  # For tmux, IDE, prompt-line consumers.
+
 claude-lifeline watch [SESSION]   # tail -f a transcript JSONL — pretty-prints
                                   # user / assistant / tool_use / tool_result
                                   # entries live. Omit SESSION for the most

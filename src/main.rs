@@ -5,6 +5,7 @@ mod data;
 mod doctor;
 mod git;
 mod input;
+mod json_render;
 mod render;
 mod tui;
 mod update;

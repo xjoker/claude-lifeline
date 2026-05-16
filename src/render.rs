@@ -19,6 +19,16 @@ pub fn render(ctx: &RenderContext) {
     render_mini(ctx);
 }
 
+/// Emit a JSON snapshot of the same data the ANSI renderer would draw. Stable schema —
+/// callers should parse `schema_version` and treat unknown fields as additive.
+pub fn render_json(ctx: &RenderContext) {
+    let value = crate::json_render::build(ctx);
+    match serde_json::to_string_pretty(&value) {
+        Ok(s) => println!("{s}"),
+        Err(_) => println!("{{}}"),
+    }
+}
+
 /// 探测终端列宽，优先级：COLUMNS env → stdin/stdout/stderr tty → /dev/tty → 200 兜底
 ///
 /// Claude Code GUI app 的 hook 子进程 stdin/stdout/stderr 全是 pipe，且无 controlling
