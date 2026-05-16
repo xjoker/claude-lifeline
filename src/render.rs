@@ -289,8 +289,12 @@ fn quota_block(
     block(bg, fg, &text)
 }
 
-/// 扩容池金额紧凑显示：>=1000 用 1.2K 风格，<1000 取整
+/// 扩容池金额紧凑显示：>=1000 用 1.2K 风格，<1000 取整。
+/// 非有限值（NaN / ±Inf）统一降级为 `?`，防御 API 异常返回污染 UI
 fn format_credits(amount: f64) -> String {
+    if !amount.is_finite() {
+        return "?".to_string();
+    }
     let abs = amount.abs();
     if abs >= 10_000.0 {
         format!("{:.0}K", amount / 1_000.0)
@@ -301,22 +305,45 @@ fn format_credits(amount: f64) -> String {
     }
 }
 
-/// extra_usage 块：`$5.4K/20K 27%`；货币非 USD 时降级为 `[XYZ] used/limit pct%`
+/// 货币代码的最大显示长度。ISO 4217 是 3 字符；放宽到 6 容纳非标代号，
+/// 同时挡住 API 异常返回（如几十/几百字节）撑爆 prefix
+const CURRENCY_MAX_CHARS: usize = 6;
+
+/// 清理货币代码：仅保留 ASCII 字母数字 + 限长。
+/// ISO 4217 是 3 个 ASCII 大写字母，放宽到 alphanumeric 容纳少数非标代号；
+/// 拒绝括号 / 控制字符 / 标点等任何可能扰乱 `[XXX]` 包装或终端渲染的字符
+fn sanitize_currency(raw: &str) -> String {
+    let filtered: String = raw.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+    if filtered.chars().count() <= CURRENCY_MAX_CHARS {
+        filtered
+    } else {
+        filtered.chars().take(CURRENCY_MAX_CHARS).collect()
+    }
+}
+
+/// extra_usage 块：`$5.4K/20K 27%`；货币非 USD 时降级为 `[XYZ] used/limit pct%`。
+/// 颜色阈值有意复用 7d quota 的 yellow_at/red_at —— extra_usage 是月度池，
+/// 但语义上同属"长周期累计配额"，独立阈值边际收益有限，先共用避免配置膨胀
 fn extra_usage_block(extra: &crate::usage::ExtraUsage, t: &Thresholds) -> String {
-    let (bg, fg) = quota_block_colors(
-        extra.utilization,
-        false,
-        t.seven_day_yellow_at,
-        t.seven_day_red_at,
-    );
+    // utilization 进 quota_block_colors 前 clamp，防御 NaN / 越界
+    let util = if extra.utilization.is_finite() {
+        extra.utilization.clamp(0.0, 100.0)
+    } else {
+        0.0
+    };
+    let (bg, fg) = quota_block_colors(util, false, t.seven_day_yellow_at, t.seven_day_red_at);
     let used = format_credits(extra.used_credits);
     let limit = format_credits(extra.monthly_limit);
-    let prefix = if extra.currency.eq_ignore_ascii_case("USD") {
+    let currency = sanitize_currency(&extra.currency);
+    let prefix = if currency.eq_ignore_ascii_case("USD") {
         "$".to_string()
+    } else if currency.is_empty() {
+        // 极端情况：API 返回空 currency 又非 USD 默认值；不画 prefix 避免 `[] xxx`
+        String::new()
     } else {
-        format!("[{}] ", extra.currency)
+        format!("[{currency}] ")
     };
-    let text = format!("{prefix}{used}/{limit} {:.0}%", extra.utilization);
+    let text = format!("{prefix}{used}/{limit} {util:.0}%");
     block(bg, fg, &text)
 }
 
@@ -620,5 +647,101 @@ mod tests {
     fn visible_width_strips_ansi() {
         let s = format!("{}plain{}", "\x1b[48;5;60m", "\x1b[0m");
         assert_eq!(visible_width(&s), "plain".chars().count());
+    }
+
+    #[test]
+    fn credits_handles_non_finite() {
+        assert_eq!(format_credits(f64::NAN), "?");
+        assert_eq!(format_credits(f64::INFINITY), "?");
+        assert_eq!(format_credits(f64::NEG_INFINITY), "?");
+        // 有限值不受影响（回归）
+        assert_eq!(format_credits(5_440.0), "5.4K");
+    }
+
+    #[test]
+    fn extra_usage_block_clamps_utilization_overflow() {
+        // API 异常返回 >100% 利用率：clamp 到 100，不让百分比 UI 越界
+        let extra = ExtraUsage {
+            monthly_limit: 100.0,
+            used_credits: 250.0,
+            utilization: 250.0,
+            currency: "USD".into(),
+        };
+        let plain = strip_ansi(&extra_usage_block(&extra, &Thresholds::default()));
+        assert!(plain.contains("100%"), "got: {plain}");
+        assert!(!plain.contains("250%"));
+    }
+
+    #[test]
+    fn extra_usage_block_handles_nan_utilization() {
+        let extra = ExtraUsage {
+            monthly_limit: 100.0,
+            used_credits: 50.0,
+            utilization: f64::NAN,
+            currency: "USD".into(),
+        };
+        let plain = strip_ansi(&extra_usage_block(&extra, &Thresholds::default()));
+        // NaN clamp 后置 0%，不再泄漏字面 "NaN"
+        assert!(plain.contains("0%"));
+        assert!(!plain.contains("NaN"));
+    }
+
+    #[test]
+    fn extra_usage_block_sanitizes_currency_control_chars() {
+        // 防 ANSI 转义注入：构造完整的 SGR 序列作为 currency，
+        // 滤掉 ESC + `[` + `;` + `m` 等所有非 alphanumeric 字符后应只剩字母数字
+        let extra = ExtraUsage {
+            monthly_limit: 100.0,
+            used_credits: 10.0,
+            utilization: 10.0,
+            currency: "AB\x1b[31;1mCD".into(),
+        };
+        let raw = extra_usage_block(&extra, &Thresholds::default());
+        // 关键安全断言：原始 ESC 字节不得出现在 block() 包装之外的 SGR 序列里
+        // block() 自己的 SGR 是 `\x1b[48;5;...` 和 `\x1b[0m`，不会含 `\x1b[31;1m`
+        assert!(
+            !raw.contains("\x1b[31"),
+            "ESC injection survived sanitization: {raw:?}"
+        );
+        // 滤后仅保留 alphanumeric：`AB[31;1mCD` 里的 `[`/`;`/`\x1b` 全删，留 `AB311mCD`
+        let plain = strip_ansi(&raw);
+        assert!(plain.contains("[AB311m"), "got: {plain}");
+        // 进一步保证：visible 输出全 ASCII 可打印，无残留控制字符
+        for c in plain.chars() {
+            assert!(
+                !c.is_control(),
+                "control char in visible output: {:?} in {plain:?}",
+                c
+            );
+        }
+    }
+
+    #[test]
+    fn extra_usage_block_truncates_oversized_currency() {
+        // 防御 API 返回数百字节 currency 撑爆 UI
+        let huge = "X".repeat(500);
+        let extra = ExtraUsage {
+            monthly_limit: 100.0,
+            used_credits: 10.0,
+            utilization: 10.0,
+            currency: huge,
+        };
+        let plain = strip_ansi(&extra_usage_block(&extra, &Thresholds::default()));
+        // currency 部分被截到 6 字符以内（CURRENCY_MAX_CHARS）
+        assert!(plain.contains("[XXXXXX]"), "got: {plain}");
+        assert!(!plain.contains("XXXXXXX"), "got: {plain}");
+    }
+
+    #[test]
+    fn extra_usage_block_empty_currency_omits_prefix() {
+        let extra = ExtraUsage {
+            monthly_limit: 100.0,
+            used_credits: 10.0,
+            utilization: 10.0,
+            currency: String::new(),
+        };
+        let plain = strip_ansi(&extra_usage_block(&extra, &Thresholds::default()));
+        assert!(!plain.contains("[]"));
+        assert!(!plain.contains('$'));
     }
 }
