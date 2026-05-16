@@ -160,6 +160,7 @@ const BG_WARN: u8 = 221;       // #ffd75f 金黄
 const BG_DANGER: u8 = 167;     // #d75f5f 印度红
 const BG_QUOTA_SAFE: u8 = 110; // #87afd7 天蓝
 const BG_STATS: u8 = 238;      // #444444 中性暗灰，stats 块底色
+const BG_SUBSCRIPTION: u8 = 60; // #5f5f87 紫灰，订阅块；与 Sonnet 99 / Opus 134 拉开
 
 /// 渲染单个色块：` text `（前后各一空格内边距），256-color SGR
 fn block(bg: u8, fg: u8, text: &str) -> String {
@@ -288,6 +289,37 @@ fn quota_block(
     block(bg, fg, &text)
 }
 
+/// 扩容池金额紧凑显示：>=1000 用 1.2K 风格，<1000 取整
+fn format_credits(amount: f64) -> String {
+    let abs = amount.abs();
+    if abs >= 10_000.0 {
+        format!("{:.0}K", amount / 1_000.0)
+    } else if abs >= 1_000.0 {
+        format!("{:.1}K", amount / 1_000.0)
+    } else {
+        format!("{amount:.0}")
+    }
+}
+
+/// extra_usage 块：`$5.4K/20K 27%`；货币非 USD 时降级为 `[XYZ] used/limit pct%`
+fn extra_usage_block(extra: &crate::usage::ExtraUsage, t: &Thresholds) -> String {
+    let (bg, fg) = quota_block_colors(
+        extra.utilization,
+        false,
+        t.seven_day_yellow_at,
+        t.seven_day_red_at,
+    );
+    let used = format_credits(extra.used_credits);
+    let limit = format_credits(extra.monthly_limit);
+    let prefix = if extra.currency.eq_ignore_ascii_case("USD") {
+        "$".to_string()
+    } else {
+        format!("[{}] ", extra.currency)
+    };
+    let text = format!("{prefix}{used}/{limit} {:.0}%", extra.utilization);
+    block(bg, fg, &text)
+}
+
 /// 紧凑时长：<1m→"1m"，<1h→"Xm"，<1d→"XhYm"（省空格）, >=1d→"XdYh"
 fn format_short_duration(secs: i64) -> String {
     if secs < 60 {
@@ -318,6 +350,20 @@ fn render_mini(ctx: &RenderContext) {
     // 模型短名（按强度配色）
     let model = short_model(&crate::input::get_model_name(&ctx.stdin));
     identity.push(block(model_block_bg(&model), FG_DARK, &model));
+
+    // 订阅块：从 OAuth 凭证里解析，紧贴 model；凭证缺失/解析失败时不渲染
+    // 调用走 read_credentials —— 凭证文件已被 usage 模块读过一次，但 OS 一般会缓存 inode，
+    // 二次同步读 <1ms 不影响 sub-50ms 目标。Keychain fallback 仅在凭证文件缺失时触发
+    if ctx.config.display.subscription {
+        if let Some(cred) = crate::auth::read_credentials() {
+            if let Some(label) = crate::auth::subscription_label(
+                cred.subscription_type.as_deref(),
+                cred.rate_limit_tier.as_deref(),
+            ) {
+                identity.push(block(BG_SUBSCRIPTION, FG_DARK, &label));
+            }
+        }
+    }
 
     // 项目名（截断到 16 列）
     let project_name_raw = ctx
@@ -416,6 +462,29 @@ fn render_mini(ctx: &RenderContext) {
                     t.seven_day_red_at,
                 ));
             }
+        }
+    }
+
+    // Opus 7d（仅 display.seven_day_opus 开启 + 超速时出现，行为对齐 Sonnet）
+    if ctx.config.display.seven_day_opus {
+        if let Some(w) = &ctx.usage.seven_day_opus {
+            let pace = crate::usage::calc_pace(w, crate::usage::WINDOW_7D_SECS, t.pace_tolerance);
+            if pace.as_ref().is_some_and(|p| p.direction == crate::usage::PaceDirection::Over) {
+                metrics.push(quota_block(
+                    w,
+                    pace.as_ref(),
+                    "O",
+                    t.seven_day_yellow_at,
+                    t.seven_day_red_at,
+                ));
+            }
+        }
+    }
+
+    // 扩容池：display 开启 + extra_usage 存在（is_enabled=false 已在 usage 层过滤）才出现
+    if ctx.config.display.extra_usage {
+        if let Some(extra) = &ctx.usage.extra_usage {
+            metrics.push(extra_usage_block(extra, t));
         }
     }
 

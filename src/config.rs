@@ -99,9 +99,19 @@ pub struct DisplayConfig {
     /// 显示代码改动量 +X -Y（仅当本 session 有增删时）
     #[serde(default = "yes")]
     pub edit_stats: bool,
+    /// 显示订阅类型块（如 `MAX·20x` / `PRO`）。默认关闭，保持升级后 UI 不变
+    #[serde(default = "no")]
+    pub subscription: bool,
+    /// 显示 Opus 7d 子额度块（类比 Sonnet：仅超速时出现）。默认关闭
+    #[serde(default = "no")]
+    pub seven_day_opus: bool,
+    /// 显示月度付费扩容池块（仅 is_enabled=true 时有意义）。默认关闭
+    #[serde(default = "no")]
+    pub extra_usage: bool,
 }
 
 fn yes() -> bool { true }
+fn no() -> bool { false }
 
 impl Default for DisplayConfig {
     fn default() -> Self {
@@ -110,6 +120,9 @@ impl Default for DisplayConfig {
             five_hour: true,
             seven_day: true,
             edit_stats: true,
+            subscription: false,
+            seven_day_opus: false,
+            extra_usage: false,
         }
     }
 }
