@@ -8,26 +8,22 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
 use crate::config::Config;
-use crate::data::aggregate::{self, UsageRollup};
-use crate::data::session::SessionSummary;
 use crate::usage::UsageData;
 
-/// Top-level pages the user can tab between.
+/// Top-level pages. Intentionally minimal — the TUI is a configuration / diagnostics
+/// surface, not a session dashboard. Full session monitoring belongs in the prompt
+/// statusline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
-    Sessions,
-    Usage,
     Config,
     Logs,
 }
 
 impl Tab {
-    pub const ALL: [Tab; 4] = [Tab::Sessions, Tab::Usage, Tab::Config, Tab::Logs];
+    pub const ALL: [Tab; 2] = [Tab::Config, Tab::Logs];
 
     pub fn title(&self) -> &'static str {
         match self {
-            Tab::Sessions => "Sessions",
-            Tab::Usage => "Usage",
             Tab::Config => "Config",
             Tab::Logs => "Logs",
         }
@@ -36,85 +32,32 @@ impl Tab {
 
 pub struct AppState {
     pub tab: Tab,
-    /// Full, mtime-sorted scan of every transcript on disk. Sessions view filters this
-    /// at render time via `show_all_sessions`; Usage rollups always use the full set.
-    pub sessions: Vec<SessionSummary>,
-    pub rollup_all: UsageRollup,
-    pub rollup_week: UsageRollup,
-    pub rollup_today: UsageRollup,
     pub config: Config,
     pub usage_live: UsageData,
     pub status_message: Option<String>,
-    pub session_cursor: usize,
     pub config_cursor: usize,
     pub update_hint: Option<String>,
     pub should_quit: bool,
-    /// false (default): Sessions view shows only currently-active sessions
-    /// (last entry within ACTIVE_THRESHOLD). `a` toggles to true to show all.
-    pub show_all_sessions: bool,
 }
 
 impl AppState {
-    /// Subset of sessions to display on the Sessions tab. Honors `show_all_sessions`.
-    pub fn visible_sessions(&self) -> Vec<&SessionSummary> {
-        if self.show_all_sessions {
-            self.sessions.iter().collect()
-        } else {
-            self.sessions.iter().filter(|s| crate::data::session::is_active(s)).collect()
-        }
-    }
-}
-
-impl AppState {
-    pub fn active_session_count(&self) -> usize {
-        self.sessions
-            .iter()
-            .filter(|s| crate::data::session::is_active(s))
-            .count()
-    }
-
     pub async fn load() -> Self {
-        let sessions = tokio::task::spawn_blocking(crate::data::session::scan_all_sessions)
-            .await
-            .unwrap_or_default();
-        let rollup_all = aggregate::rollup(&sessions, None);
-        let rollup_week = aggregate::rollup(&sessions, Some(aggregate::cutoff_week()));
-        let rollup_today = aggregate::rollup(&sessions, Some(aggregate::cutoff_today()));
         let config = crate::config::read_config();
         let usage_live = crate::usage::get_usage_data(None).await;
         let update_hint = crate::update::check_update_hint();
 
         Self {
-            tab: Tab::Sessions,
-            sessions,
-            rollup_all,
-            rollup_week,
-            rollup_today,
+            tab: Tab::Config,
             config,
             usage_live,
             status_message: None,
-            session_cursor: 0,
             config_cursor: 0,
             update_hint,
             should_quit: false,
-            show_all_sessions: false,
         }
     }
 
     pub async fn refresh(&mut self) {
-        let sessions = tokio::task::spawn_blocking(crate::data::session::scan_all_sessions)
-            .await
-            .unwrap_or_default();
-        self.rollup_all = aggregate::rollup(&sessions, None);
-        self.rollup_week = aggregate::rollup(&sessions, Some(aggregate::cutoff_week()));
-        self.rollup_today = aggregate::rollup(&sessions, Some(aggregate::cutoff_today()));
-        self.sessions = sessions;
-        // Clamp cursor against whichever view is currently visible (active filter
-        // shrinks the list considerably).
-        let visible_len = self.visible_sessions().len();
-        if self.session_cursor >= visible_len {
-            self.session_cursor = visible_len.saturating_sub(1);
-        }
         self.config = crate::config::read_config();
         self.usage_live = crate::usage::get_usage_data(None).await;
         self.update_hint = crate::update::check_update_hint();
@@ -192,17 +135,14 @@ async fn handle_key(state: &mut AppState, key: KeyEvent) {
             state.refresh().await;
             return;
         }
-        KeyCode::Char('1') => state.tab = Tab::Sessions,
-        KeyCode::Char('2') => state.tab = Tab::Usage,
-        KeyCode::Char('3') => state.tab = Tab::Config,
-        KeyCode::Char('4') => state.tab = Tab::Logs,
+        KeyCode::Char('1') => state.tab = Tab::Config,
+        KeyCode::Char('2') => state.tab = Tab::Logs,
         _ => {}
     }
 
     // Tab-specific keys
     match state.tab {
-        Tab::Sessions => crate::tui::views::sessions::handle_key(state, key),
         Tab::Config => crate::tui::views::config::handle_key(state, key).await,
-        Tab::Usage | Tab::Logs => {}
+        Tab::Logs => {}
     }
 }

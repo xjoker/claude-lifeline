@@ -44,8 +44,6 @@ fn draw_tabs(frame: &mut Frame, state: &AppState, area: Rect) {
 
 fn draw_body(frame: &mut Frame, state: &AppState, area: Rect) {
     match state.tab {
-        Tab::Sessions => super::views::sessions::draw(frame, state, area),
-        Tab::Usage => super::views::usage::draw(frame, state, area),
         Tab::Config => super::views::config::draw(frame, state, area),
         Tab::Logs => super::views::logs::draw(frame, state, area),
     }
@@ -57,8 +55,6 @@ fn draw_footer(frame: &mut Frame, state: &AppState, area: Rect) {
         Span::raw(" switch  "),
         Span::styled("r", Style::default().fg(Color::Yellow)),
         Span::raw(" refresh  "),
-        Span::styled("a", Style::default().fg(Color::Yellow)),
-        Span::raw(" toggle all/active  "),
         Span::styled("q/esc", Style::default().fg(Color::Yellow)),
         Span::raw(" quit"),
     ];

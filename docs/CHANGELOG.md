@@ -11,6 +11,17 @@ All notable changes to claude-lifeline will be documented in this file.
   Whitespace-only values fall back to the `~/.claude` default. `doctor` reports
   the resolved root and flags when the override is in effect.
 
+### Changed
+- **TUI scope narrowed.** The Sessions and Usage tabs added in 0.4.0 have been
+  removed; the TUI is now a focused configuration + diagnostics panel
+  (`Config`, `Logs`). Rationale: predictive statusline is the product, and a
+  full session dashboard belongs in dedicated tooling rather than competing for
+  attention in this binary.
+- `data::aggregate` module removed (only the Usage tab consumed its rollups).
+- `data::session::SessionSummary` trimmed to the fields current callers
+  actually read (session_id, project_dir, started_at, model). Token totals
+  and message counts can come back when a future feature needs them.
+
 ## [0.4.0] - 2026-05-16
 
 This release re-shapes `claude-lifeline` from a single-purpose statusline
