@@ -1,46 +1,60 @@
 # claude-lifeline
 
-A fast Rust status line for [Claude Code](https://docs.anthropic.com/en/docs/claude-code), replacing the default status bar with a feature-rich, sub-50ms native binary. Supports **macOS**, **Linux**, and **Windows**.
+**The predictive statusline for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — warns you *before* you hit the limit, not after.**
+
+Most status bars show you a percentage. claude-lifeline tells you whether that percentage is **ahead of pace**, **when** the window will run out at the current burn rate, and **how long** to pause for pace to catch up. Single line, sub-50ms, Rust, runs on **macOS / Linux / Windows**.
 
 **[中文文档](docs/README_CN.md)**
 
 ## Preview
 
-Single-line color-block bar with everything inline.
+```
+ Opus 4.7 1M  claude-lifeline  master  +95 -442  ctx 21%  3/28%  63/68%  S:87/68%! →5/13 16:08 ↓1d8h
+                                                                          ▲         ▲           ▲
+                                                                  Over-pace `!`  Depletion ETA  Recovery wait
+```
 
 ![claude-lifeline mini layout](docs/img-mini.png)
 
-```
- Opus 4.7 1M  claude-lifeline  master  +95 -442  ctx 21%  100% 3m19s  3/28%  63/68%  S:87/68%! →5/13 16:08 ↓1d8h
-```
+## Why a *predictive* statusline?
 
-## Why claude-lifeline?
+The Claude Code default status bar shows you `5h: 67%` and walks away. Two questions it never answers:
 
-Claude Code's default status bar shows basic usage percentages — but that tells you nothing about whether you're *on track* to last the full window.
+1. *Is 67% normal right now, or am I about to burn out?*
+2. *If I keep at this rate, when does it actually hit 100%?*
 
-claude-lifeline adds **pace intelligence**: it compares your actual consumption rate against the ideal pace for each quota window, and warns you before you burn out.
+claude-lifeline answers both. For each rate-limit window it computes a **pace marker** (`elapsed_time / window`) and compares it to your actual `used_percentage`. When usage runs ahead of pace, the block lights up and tells you exactly when you'll cap out and how long to idle for the pace marker to catch up.
 
-### What you get at a glance
+### Pace signals at a glance
 
-- **Over-pace alert `!`** — appended to the quota when actual usage runs ahead of the elapsed-time pace
-- **Depletion ETA `→HH:MM`** — predicts the local time your quota hits 100% at the current burn rate (only shown when over-pace)
-- **Recovery wait `↓Xh`** — tells you how long to pause so your pace catches up
-- **Sonnet sub-quota alert** — when Sonnet-specific usage outruns pace, an extra `S:U/P%!` block appears next to the regular 7d block (hidden otherwise)
+| Signal | Looks like | Meaning |
+|---|---|---|
+| **`!`** | `85/23%!` | Used 85% but only 23% of the window has elapsed → over-pace alert |
+| **`→HH:MM`** | `→9:35` | Depletion ETA at the current burn rate (`M/D HH:MM` if next day) |
+| **`↓Xh`** | `↓2h` | Pause this long for pace to align back with usage |
+| **`S:` / `O:` sub-block** | `S:87/68%!` | Sonnet- or Opus-specific quota over-pace (hidden otherwise) |
 
-### Optional segments (off by default)
+### What it shows by default
 
-Opt-in via `~/.claude/claude-lifeline/config.toml`:
+- **5h / 7d quota blocks** with pace, ETA, recovery — colour-coded green / yellow / red by configurable thresholds
+- **Context window** % with green / yellow / red bands
+- **Git** branch + dirty + ahead/behind upstream
+- **Edit stats** (`+lines / -lines`) from Claude Code's session counter
+- **Model** with intensity-coded background (Opus / Sonnet / Haiku)
+- Auto-detect over-pace **Sonnet** sub-quota (`S:U/P%!`) — silent otherwise
 
-- **Subscription badge** (`display.subscription`) — shows the plan parsed from OAuth credentials, e.g. `MAX·20x`, `MAX·5x`, `PRO`, `FREE`
-- **Opus 7d sub-quota** (`display.seven_day_opus`) — mirrors the Sonnet sub-quota for Opus; shown as `O:U/P%!` only when over-pace
-- **Extra-usage credit pool** (`display.extra_usage`) — surfaces the monthly paid top-up balance as `$5.4K/20K 27%` (USD) or `[XYZ] used/limit pct%` for other currencies; auto-hidden when the pool is not enabled on your account
+### Optional (opt-in via config)
 
-### Also included
+- **Subscription badge** — `MAX·20x` / `PRO` / `FREE` parsed from OAuth credentials
+- **Opus 7d sub-quota** — mirrors Sonnet; appears only when Opus burns ahead
+- **Extra-usage credit pool** — `$5.4K/20K 27%` for the monthly paid top-up
 
-- Git branch, dirty status, ahead/behind upstream
-- Session edit stats (`+lines_added` / `-lines_removed`)
-- Configurable segments — toggle context, 5h quota, 7d quota, edit stats, plus the optional segments above via TOML
-- **~30ms** response, **~3MB** binary, zero runtime dependencies (static on Linux/Windows, signed on macOS)
+## Performance
+
+- **~30 ms** statusline response (well under Claude Code's 500 ms budget)
+- **~3 MB** release binary, fully static (musl on Linux, static CRT on Windows, signed on macOS)
+- Git commands and usage data fetch run concurrently via `tokio::join!`
+- No daemon, no background process — Claude Code respawns it every refresh interval
 
 ## Install
 
@@ -277,19 +291,14 @@ See [config.example.toml](config.example.toml) for reference.
 
 ## CLI Commands
 
-Starting with **0.4.0**, `claude-lifeline` is more than a status line. Running it
-with no arguments (the way Claude Code invokes it) keeps the original
-stdin-driven status-line behaviour, but the same binary now offers:
+The default invocation (no arguments — what Claude Code uses) renders the status
+line from stdin. The same binary also exposes a small set of utility commands:
 
 ```bash
-claude-lifeline tui               # Interactive ratatui dashboard:
-                                  # · Sessions list across all projects
-                                  # · Live 5h / 7d / Opus quota gauges
-                                  # · Today / 7d / all-time rollups
-                                  # · Config toggles (writes back to TOML)
-                                  # Keys: tab/1-4 switch, j/k navigate,
-                                  #       space/enter toggle, r refresh,
-                                  #       q/esc quit
+claude-lifeline watch [SESSION]   # tail -f a transcript JSONL — pretty-prints
+                                  # user / assistant / tool_use / tool_result
+                                  # entries live. Omit SESSION for the most
+                                  # recently active transcript.
 
 claude-lifeline config show       # Print resolved config
 claude-lifeline config path       # Print path to config.toml
@@ -297,25 +306,30 @@ claude-lifeline config edit       # Open config.toml in $EDITOR
 claude-lifeline config init       # Seed config.toml from defaults
 
 claude-lifeline update check      # Compare local version to GitHub release
-claude-lifeline update run        # Download and atomically replace the
-                                  # running binary; verifies SHA256SUMS
-                                  # before swap (warns if a release has
-                                  # none — back-compat with pre-0.4.0)
+claude-lifeline update run        # Download and atomically replace the running
+                                  # binary; verifies SHA256SUMS before swap
 
 claude-lifeline doctor            # Diagnostic report: PATH, data dir,
-                                  # credentials, transcript count, and
-                                  # Claude Code statusLine integration
+                                  # credentials, transcript count, Claude Code
+                                  # statusLine integration
 
-claude-lifeline watch [SESSION]   # tail -f a transcript JSONL; pretty-
-                                  # prints user / assistant / tool_use /
-                                  # tool_result events with timestamps.
-                                  # Omit SESSION to follow the most
-                                  # recently modified transcript.
+claude-lifeline tui               # Visual config / diagnostics panel.
+                                  # Intentionally lightweight.
 ```
 
-The TUI scans `~/.claude/projects/**/*.jsonl` on each refresh — no shared
-session-state file is written, so it is safe to keep open while multiple
-Claude Code windows are active.
+## Roadmap
+
+claude-lifeline is positioned as the *predictive* statusline. The next iterations
+add real signal on top of pace forecasting:
+
+- **Burn-rate trend** — short-window (1h) vs full-window burn rate divergence so
+  you see when a session ramped up, not just the average
+- **Forecast confidence** — softer predictions when the data is thin (fresh
+  session / a few samples) instead of the over-confident linear extrapolation
+- **Smart alerts** — context-aware nudges (`TRY /clear`, model right-sizing)
+- **`--json` output** for tmux / IDE / prompt-line consumers
+
+See [docs/CHANGELOG.md](docs/CHANGELOG.md) for what's currently shipped.
 
 ## Data Sources
 
@@ -336,13 +350,6 @@ For the API fallback, OAuth token is read from:
 2. **macOS Keychain** — `security find-generic-password -s "Claude Code-credentials"` fallback for Claude.app installs where the credential file is absent
 
 The same source also supplies `subscriptionType` (e.g. `max` / `pro`) and `rateLimitTier` (e.g. `default_claude_max_20x`) for the optional subscription badge — no separate API call is made.
-
-## Performance
-
-- **~30ms** response time (well under Claude Code's 500ms budget)
-- **~3MB** release binary (LTO + strip)
-- Git commands, usage data fetch run concurrently via `tokio::join!`
-- All binaries are fully static (musl on Linux, static CRT on Windows)
 
 ## Supported Platforms
 

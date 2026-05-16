@@ -35,12 +35,11 @@ claude-lifeline 加入**配速智能**：把实际消耗速率和每个配额窗
 - **Opus 7d 子配额**（`display.seven_day_opus`）——类比 Sonnet 子块，仅在 Opus 用量超速时显示 `O:U/P%!`
 - **付费扩容池**（`display.extra_usage`）——展示月度付费扩容余额：`$5.4K/20K 27%`（USD）或 `[XYZ] used/limit pct%`；账户未开通扩容时自动隐藏
 
-### 其他功能
+### 性能
 
-- Git 分支、dirty 状态、ahead/behind upstream
-- 会话编辑量（`+lines_added` / `-lines_removed`）
-- 段可配置——TOML 里开关 context / 5h / 7d / edit stats，以及上面三个可选段
-- **~30ms** 响应、**~3MB** 二进制、零运行时依赖（Linux/Windows 静态，macOS 签名）
+- **~30 ms** statusline 响应（远低于 Claude Code 的 500 ms 预算）
+- **~3 MB** release 二进制，全静态（Linux musl / Windows static CRT / macOS 签名）
+- 无 daemon、无后台进程——Claude Code 每次刷新自动 respawn
 
 ## 安装
 
