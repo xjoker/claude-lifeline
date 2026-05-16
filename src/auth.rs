@@ -13,6 +13,13 @@ pub struct CredentialsFile {
 pub struct OAuthCredential {
     #[serde(rename = "accessToken")]
     pub access_token: Option<String>,
+    /// 订阅类型：观测到的值 "max" / "pro" / "free"；大小写以 Anthropic 返回为准
+    #[serde(rename = "subscriptionType", default)]
+    pub subscription_type: Option<String>,
+    /// 速率档：观测到的值如 "default_claude_max_20x" / "default_claude_max_5x" /
+    /// "default_claude_pro"；比 subscription_type 更精细，可区分 Max 20x vs 5x
+    #[serde(rename = "rateLimitTier", default)]
+    pub rate_limit_tier: Option<String>,
 }
 
 // 自定义 Debug 遮蔽 access_token —— 防止意外通过 `{:?}` / panic / anyhow context
@@ -21,8 +28,51 @@ impl fmt::Debug for OAuthCredential {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("OAuthCredential")
             .field("access_token", &self.access_token.as_ref().map(|_| "[REDACTED]"))
+            .field("subscription_type", &self.subscription_type)
+            .field("rate_limit_tier", &self.rate_limit_tier)
             .finish()
     }
+}
+
+/// 把 (subscription_type, rate_limit_tier) 解析为状态栏紧凑标签。
+///
+/// 优先级：rate_limit_tier > subscription_type。两者都缺返回 None。
+///
+/// 已观测到的速率档命名规律（Anthropic 公开 OAuth 字段，2026-05）：
+///   `default_claude_<plan>` 或 `default_claude_<plan>_<multiplier>`
+/// 解析时取末段，识别 `max_20x`/`max_5x`/`pro` 等；未知值大写降级处理。
+pub fn subscription_label(
+    subscription_type: Option<&str>,
+    rate_limit_tier: Option<&str>,
+) -> Option<String> {
+    if let Some(tier) = rate_limit_tier.map(str::trim).filter(|s| !s.is_empty()) {
+        if let Some(label) = parse_rate_limit_tier(tier) {
+            return Some(label);
+        }
+    }
+    subscription_type
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_ascii_uppercase())
+}
+
+fn parse_rate_limit_tier(tier: &str) -> Option<String> {
+    let suffix = tier.strip_prefix("default_claude_").unwrap_or(tier);
+    let mut parts = suffix.split('_');
+    let plan = parts.next()?;
+    let multiplier = parts.next();
+    let label = match (plan, multiplier) {
+        ("max", Some(m)) => format!("MAX·{m}"),
+        ("max", None) => "MAX".to_string(),
+        ("pro", _) => "PRO".to_string(),
+        ("free", _) => "FREE".to_string(),
+        ("team", _) => "TEAM".to_string(),
+        ("enterprise", _) => "ENT".to_string(),
+        // 未识别 plan：保留原始 tier 末段大写，避免吞掉新枚举值
+        (other, Some(m)) => format!("{}·{}", other.to_ascii_uppercase(), m),
+        (other, None) => other.to_ascii_uppercase(),
+    };
+    Some(label)
 }
 
 impl fmt::Debug for CredentialsFile {
