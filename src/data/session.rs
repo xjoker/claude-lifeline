@@ -24,6 +24,20 @@ pub struct SessionSummary {
 /// pathological.
 const TRANSCRIPT_MAX_BYTES: u64 = 32 * 1024 * 1024;
 
+/// "Active" heuristic: a transcript's most recent entry timestamp is within this window
+/// from now. Tuned for Claude Code's `statusLine.refreshInterval=15s` default — anything
+/// not appended to in 10 minutes is realistically a wrapped or abandoned session.
+pub const ACTIVE_THRESHOLD: chrono::Duration = chrono::Duration::minutes(10);
+
+/// Return true when the session looks like it's still being driven (last entry within
+/// `ACTIVE_THRESHOLD`). Used by the TUI Sessions view to filter out historical noise.
+pub fn is_active(summary: &SessionSummary) -> bool {
+    let Some(last) = summary.last_active_at else {
+        return false;
+    };
+    chrono::Utc::now() - last <= ACTIVE_THRESHOLD
+}
+
 /// Walk `~/.claude/projects/*/*.jsonl` and return one summary per file.
 ///
 /// Returns an empty vec on missing dir or I/O errors — TUI surface is the right place

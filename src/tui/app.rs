@@ -36,6 +36,8 @@ impl Tab {
 
 pub struct AppState {
     pub tab: Tab,
+    /// Full, mtime-sorted scan of every transcript on disk. Sessions view filters this
+    /// at render time via `show_all_sessions`; Usage rollups always use the full set.
     pub sessions: Vec<SessionSummary>,
     pub rollup_all: UsageRollup,
     pub rollup_week: UsageRollup,
@@ -47,9 +49,30 @@ pub struct AppState {
     pub config_cursor: usize,
     pub update_hint: Option<String>,
     pub should_quit: bool,
+    /// false (default): Sessions view shows only currently-active sessions
+    /// (last entry within ACTIVE_THRESHOLD). `a` toggles to true to show all.
+    pub show_all_sessions: bool,
 }
 
 impl AppState {
+    /// Subset of sessions to display on the Sessions tab. Honors `show_all_sessions`.
+    pub fn visible_sessions(&self) -> Vec<&SessionSummary> {
+        if self.show_all_sessions {
+            self.sessions.iter().collect()
+        } else {
+            self.sessions.iter().filter(|s| crate::data::session::is_active(s)).collect()
+        }
+    }
+}
+
+impl AppState {
+    pub fn active_session_count(&self) -> usize {
+        self.sessions
+            .iter()
+            .filter(|s| crate::data::session::is_active(s))
+            .count()
+    }
+
     pub async fn load() -> Self {
         let sessions = tokio::task::spawn_blocking(crate::data::session::scan_all_sessions)
             .await
@@ -74,6 +97,7 @@ impl AppState {
             config_cursor: 0,
             update_hint,
             should_quit: false,
+            show_all_sessions: false,
         }
     }
 
@@ -84,10 +108,13 @@ impl AppState {
         self.rollup_all = aggregate::rollup(&sessions, None);
         self.rollup_week = aggregate::rollup(&sessions, Some(aggregate::cutoff_week()));
         self.rollup_today = aggregate::rollup(&sessions, Some(aggregate::cutoff_today()));
-        if self.session_cursor >= sessions.len() {
-            self.session_cursor = sessions.len().saturating_sub(1);
-        }
         self.sessions = sessions;
+        // Clamp cursor against whichever view is currently visible (active filter
+        // shrinks the list considerably).
+        let visible_len = self.visible_sessions().len();
+        if self.session_cursor >= visible_len {
+            self.session_cursor = visible_len.saturating_sub(1);
+        }
         self.config = crate::config::read_config();
         self.usage_live = crate::usage::get_usage_data(None).await;
         self.update_hint = crate::update::check_update_hint();

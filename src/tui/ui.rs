@@ -57,6 +57,8 @@ fn draw_footer(frame: &mut Frame, state: &AppState, area: Rect) {
         Span::raw(" switch  "),
         Span::styled("r", Style::default().fg(Color::Yellow)),
         Span::raw(" refresh  "),
+        Span::styled("a", Style::default().fg(Color::Yellow)),
+        Span::raw(" toggle all/active  "),
         Span::styled("q/esc", Style::default().fg(Color::Yellow)),
         Span::raw(" quit"),
     ];

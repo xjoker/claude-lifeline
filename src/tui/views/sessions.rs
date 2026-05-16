@@ -8,21 +8,39 @@ use ratatui::Frame;
 use crate::tui::app::AppState;
 
 pub fn handle_key(state: &mut AppState, key: KeyEvent) {
-    if state.sessions.is_empty() {
+    // `a` toggles the active-only filter regardless of whether the visible list is
+    // currently empty — without it the user would be stuck on an empty active list and
+    // unable to switch back to the historical view.
+    if matches!(key.code, KeyCode::Char('a')) {
+        state.show_all_sessions = !state.show_all_sessions;
+        state.session_cursor = 0;
+        state.status_message = Some(format!(
+            "sessions: {}",
+            if state.show_all_sessions {
+                "showing all"
+            } else {
+                "active only (last 10 min)"
+            }
+        ));
+        return;
+    }
+
+    let visible_len = state.visible_sessions().len();
+    if visible_len == 0 {
         return;
     }
     match key.code {
         KeyCode::Down | KeyCode::Char('j') => {
-            state.session_cursor = (state.session_cursor + 1) % state.sessions.len();
+            state.session_cursor = (state.session_cursor + 1) % visible_len;
         }
         KeyCode::Up | KeyCode::Char('k') => {
             state.session_cursor = state
                 .session_cursor
                 .checked_sub(1)
-                .unwrap_or(state.sessions.len() - 1);
+                .unwrap_or(visible_len - 1);
         }
         KeyCode::Home => state.session_cursor = 0,
-        KeyCode::End => state.session_cursor = state.sessions.len() - 1,
+        KeyCode::End => state.session_cursor = visible_len - 1,
         _ => {}
     }
 }
@@ -38,8 +56,8 @@ pub fn draw(frame: &mut Frame, state: &AppState, area: Rect) {
 }
 
 fn draw_list(frame: &mut Frame, state: &AppState, area: Rect) {
-    let items: Vec<ListItem> = state
-        .sessions
+    let visible = state.visible_sessions();
+    let items: Vec<ListItem> = visible
         .iter()
         .map(|s| {
             let model = s.model.as_deref().unwrap_or("?");
@@ -53,7 +71,10 @@ fn draw_list(frame: &mut Frame, state: &AppState, area: Rect) {
                 .last_active_at
                 .map(|t| t.with_timezone(&chrono::Local).format("%m-%d %H:%M").to_string())
                 .unwrap_or_else(|| "—".into());
+            let is_active = crate::data::session::is_active(s);
+            let dot_color = if is_active { Color::Green } else { Color::DarkGray };
             ListItem::new(Line::from(vec![
+                Span::styled("● ", Style::default().fg(dot_color)),
                 Span::styled(format!("{when:<11}"), Style::default().fg(Color::DarkGray)),
                 Span::styled(
                     format!("{project:<18}"),
@@ -64,12 +85,16 @@ fn draw_list(frame: &mut Frame, state: &AppState, area: Rect) {
         })
         .collect();
 
+    let active_count = state.active_session_count();
+    let total = state.sessions.len();
+    let title = if state.show_all_sessions {
+        format!(" sessions · all {total} ({active_count} active) — press 'a' to filter ")
+    } else {
+        format!(" sessions · active {active_count}/{total} — press 'a' to show all ")
+    };
+
     let list = List::new(items)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(format!(" sessions ({}) ", state.sessions.len())),
-        )
+        .block(Block::default().borders(Borders::ALL).title(title))
         .highlight_style(
             Style::default()
                 .bg(Color::DarkGray)
@@ -79,22 +104,22 @@ fn draw_list(frame: &mut Frame, state: &AppState, area: Rect) {
         .highlight_symbol("▌ ");
 
     let mut ls = ListState::default();
-    ls.select(if state.sessions.is_empty() { None } else { Some(state.session_cursor) });
+    ls.select(if visible.is_empty() { None } else { Some(state.session_cursor) });
     frame.render_stateful_widget(list, area, &mut ls);
 }
 
 fn draw_detail(frame: &mut Frame, state: &AppState, area: Rect) {
-    let Some(s) = state.sessions.get(state.session_cursor) else {
+    let visible = state.visible_sessions();
+    let Some(s) = visible.get(state.session_cursor).copied() else {
         let block = Block::default().borders(Borders::ALL).title(" detail ");
-        frame.render_widget(
-            Paragraph::new(if state.sessions.is_empty() {
-                "no transcripts under ~/.claude/projects/"
-            } else {
-                "select a session"
-            })
-            .block(block),
-            area,
-        );
+        let msg = if state.sessions.is_empty() {
+            "no transcripts under ~/.claude/projects/"
+        } else if !state.show_all_sessions {
+            "no active sessions in the last 10 min — press 'a' to show all"
+        } else {
+            "select a session"
+        };
+        frame.render_widget(Paragraph::new(msg).block(block), area);
         return;
     };
 
