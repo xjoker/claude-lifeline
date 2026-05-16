@@ -32,6 +32,29 @@ All notable changes to claude-lifeline will be documented in this file.
   `secs_to_100` that, when truncated and added to `now`, produced an ETA
   in the past. Now we early-return `None` unless `secs_to_100 > 0`.
 
+### Security
+- **`extra_usage` currency field is alphanumeric-filtered + length-capped**
+  (`render::sanitize_currency`, max 6 chars). The API-supplied `currency`
+  was previously passed straight into the `[XYZ]` ANSI prefix; a tampered
+  upstream returning `"AB\x1b[31;1mCD"` could have injected SGR control
+  bytes between the block's own opening and closing escape sequences.
+- **`subscription_label` output is length-bounded to 16 chars** with `..`
+  suffix on overflow, so an oversized `rateLimitTier` from a malicious or
+  buggy upstream cannot blow up the subscription block geometry.
+- **`format_credits` + `extra_usage_block` utilization guard NaN/Infinity**.
+  Anomalous IEEE-754 values from the API previously surfaced as literal
+  `"NaN"` / `"inf"` in the status bar; now non-finite credit amounts render
+  as `?` and non-finite utilization is clamped (or replaced by 0%) before
+  threshold lookup and `%` formatting.
+
+### Fixed
+- **`parse_rate_limit_tier` preserves all underscore-separated segments**
+  for both known and unknown plans (regression of new-in-0.3.0 behaviour).
+  Previously the parser dropped everything past the second segment, so a
+  hypothetical `default_claude_max_enterprise_20x` rendered as `MAX·enterprise`,
+  silently losing the multiplier. Now joins remaining segments with `·`,
+  trimmed by the 16-char label cap.
+
 ### Compatibility
 - All three new display segments default to **off**, so upgrading from
   0.2.0 leaves the existing status line untouched.
