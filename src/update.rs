@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 
 /// 升级检查缓存（24h TTL，不阻塞主流程）
-
 const CHECK_INTERVAL_SECS: i64 = 24 * 3600;
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
