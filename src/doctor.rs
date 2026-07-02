@@ -70,13 +70,9 @@ fn check_credentials() {
     let path = crate::data::paths::credentials_path();
     if path.exists() {
         line(true, "credentials", "found ~/.claude/.credentials.json");
+    } else if cfg!(target_os = "macos") {
+        line(false, "credentials", "no ~/.claude/.credentials.json (Keychain fallback will be tried)");
     } else {
-        #[cfg(target_os = "macos")]
-        {
-            line(false, "credentials", "no ~/.claude/.credentials.json (Keychain fallback will be tried)");
-            return;
-        }
-        #[cfg(not(target_os = "macos"))]
         line(false, "credentials", "no ~/.claude/.credentials.json — login via Claude Code first");
     }
 }

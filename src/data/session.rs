@@ -49,7 +49,7 @@ pub fn scan_all_sessions() -> Vec<SessionSummary> {
     }
     // Newest first by started_at — good enough for the doctor count and the
     // statusline's session lookup needs.
-    out.sort_by(|a, b| b.started_at.cmp(&a.started_at));
+    out.sort_by_key(|b| std::cmp::Reverse(b.started_at));
     out
 }
 

@@ -185,7 +185,7 @@ async fn fetch_release() -> anyhow::Result<Release> {
 }
 
 /// Pick the asset matching the running platform.
-fn pick_asset<'a>(release: &'a Release) -> Option<&'a ReleaseAsset> {
+fn pick_asset(release: &Release) -> Option<&ReleaseAsset> {
     let candidates = platform_asset_patterns();
     release.assets.iter().find(|a| {
         let name = a.name.to_lowercase();

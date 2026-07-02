@@ -7,16 +7,13 @@ use ratatui::Frame;
 use crate::tui::app::AppState;
 
 pub fn draw(frame: &mut Frame, state: &AppState, area: Rect) {
-    let mut lines = Vec::new();
-
-    lines.push(label("data dir", crate::data::paths::lifeline_data_root().display().to_string()));
-    lines.push(label("config", crate::data::paths::config_path().display().to_string()));
-    lines.push(label("projects", crate::data::paths::projects_root().display().to_string()));
-
-    lines.push(Line::from(""));
-
-    let version = env!("CARGO_PKG_VERSION");
-    lines.push(label("version", version.to_string()));
+    let mut lines = vec![
+        label("data dir", crate::data::paths::lifeline_data_root().display().to_string()),
+        label("config", crate::data::paths::config_path().display().to_string()),
+        label("projects", crate::data::paths::projects_root().display().to_string()),
+        Line::from(""),
+        label("version", env!("CARGO_PKG_VERSION").to_string()),
+    ];
     if let Some(v) = &state.update_hint {
         lines.push(label("latest", v.to_string()));
         lines.push(Line::from(Span::styled(

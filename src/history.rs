@@ -240,7 +240,7 @@ pub fn maybe_cleanup() {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.subsec_nanos())
         .unwrap_or(0);
-    if now_nanos % 50 != 0 {
+    if !now_nanos.is_multiple_of(50) {
         return;
     }
     let dir = crate::data::paths::lifeline_data_root().join("history");
