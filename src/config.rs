@@ -108,6 +108,9 @@ pub struct DisplayConfig {
     /// 显示月度付费扩容池块（仅 is_enabled=true 时有意义）。默认关闭
     #[serde(default = "no")]
     pub extra_usage: bool,
+    /// 显示会话累计费用（$X.XX）。默认关闭
+    #[serde(default = "no")]
+    pub session_cost: bool,
 }
 
 fn yes() -> bool { true }
@@ -123,6 +126,7 @@ impl Default for DisplayConfig {
             subscription: false,
             seven_day_opus: false,
             extra_usage: false,
+            session_cost: false,
         }
     }
 }
@@ -137,10 +141,11 @@ pub enum DisplayKey {
     Subscription,
     SevenDayOpus,
     ExtraUsage,
+    SessionCost,
 }
 
 impl DisplayKey {
-    pub const ALL: [DisplayKey; 7] = [
+    pub const ALL: [DisplayKey; 8] = [
         DisplayKey::Context,
         DisplayKey::FiveHour,
         DisplayKey::SevenDay,
@@ -148,6 +153,7 @@ impl DisplayKey {
         DisplayKey::Subscription,
         DisplayKey::SevenDayOpus,
         DisplayKey::ExtraUsage,
+        DisplayKey::SessionCost,
     ];
 
     pub fn label(&self) -> &'static str {
@@ -159,6 +165,7 @@ impl DisplayKey {
             DisplayKey::Subscription => "subscription tier badge",
             DisplayKey::SevenDayOpus => "Opus 7d sub-block",
             DisplayKey::ExtraUsage => "extra-usage credits",
+            DisplayKey::SessionCost => "session cost ($)",
         }
     }
 
@@ -171,6 +178,7 @@ impl DisplayKey {
             DisplayKey::Subscription => cfg.subscription,
             DisplayKey::SevenDayOpus => cfg.seven_day_opus,
             DisplayKey::ExtraUsage => cfg.extra_usage,
+            DisplayKey::SessionCost => cfg.session_cost,
         }
     }
 
@@ -183,6 +191,7 @@ impl DisplayKey {
             DisplayKey::Subscription => cfg.subscription = val,
             DisplayKey::SevenDayOpus => cfg.seven_day_opus = val,
             DisplayKey::ExtraUsage => cfg.extra_usage = val,
+            DisplayKey::SessionCost => cfg.session_cost = val,
         }
     }
 }
@@ -238,6 +247,7 @@ fn render_config_toml(config: &Config) -> String {
     s.push_str(&format!("subscription   = {}\n", config.display.subscription));
     s.push_str(&format!("seven_day_opus = {}\n", config.display.seven_day_opus));
     s.push_str(&format!("extra_usage    = {}\n", config.display.extra_usage));
+    s.push_str(&format!("session_cost   = {}\n", config.display.session_cost));
     s.push_str("\n[thresholds]\n");
     s.push_str(&format!("ctx_yellow_at       = {}\n", config.thresholds.ctx_yellow_at));
     s.push_str(&format!("ctx_red_at          = {}\n", config.thresholds.ctx_red_at));

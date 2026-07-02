@@ -13,6 +13,7 @@ pub async fn run() -> anyhow::Result<()> {
     check_credentials();
     check_projects_dir();
     check_claude_settings();
+    cleanup_orphaned_files();
 
     println!();
     println!("Done. Anything red above is worth addressing.");
@@ -88,6 +89,41 @@ fn check_projects_dir() {
     }
     let count = crate::data::session::scan_all_sessions().len();
     line(true, "projects/", &format!("{count} transcript(s) found"));
+}
+
+fn cleanup_orphaned_files() {
+    let dir = crate::data::paths::lifeline_data_root();
+    if !dir.exists() {
+        return;
+    }
+
+    let orphan_patterns: &[&str] = &["cache-ttl-", "cache-decisions", "ttl-samples"];
+    let mut removed = 0u32;
+    let mut errors = 0u32;
+
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            if orphan_patterns.iter().any(|p| name_str.starts_with(p)) {
+                match std::fs::remove_file(entry.path()) {
+                    Ok(()) => removed += 1,
+                    Err(_) => errors += 1,
+                }
+            }
+        }
+    }
+
+    if removed > 0 || errors > 0 {
+        let detail = if errors > 0 {
+            format!("removed {removed} orphaned file(s), {errors} failed")
+        } else {
+            format!("removed {removed} orphaned file(s) from pre-0.2.0 features")
+        };
+        line(errors == 0, "orphan cleanup", &detail);
+    } else {
+        line(true, "orphan cleanup", "no orphaned files found");
+    }
 }
 
 fn check_claude_settings() {

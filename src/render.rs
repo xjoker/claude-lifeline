@@ -163,7 +163,8 @@ fn stats_block(added: &str, removed: &str) -> String {
 // Alacritty / Kitty / Linux 终端）渲染一致；仅 Win10 老 cmd.exe ConHost 不支持
 // 文字统一 #080808（最深灰），所有 bg 选 mid-saturation 浅色，对比度有保证
 const FG_DARK: u8 = 232;
-// 模型强度渐变：旗舰 → 平衡 → 轻快
+// 模型强度渐变：顶级 → 旗舰 → 平衡 → 轻快
+const BG_MODEL_FABLE: u8 = 178;   // #d7af00 金色，顶级
 const BG_MODEL_OPUS: u8 = 134;    // #af5fd7 紫红，旗舰
 const BG_MODEL_SONNET: u8 = 99;   // #8787ff 紫蓝，平衡
 const BG_MODEL_HAIKU: u8 = 38;    // #00afd7 青蓝，轻快
@@ -218,17 +219,15 @@ fn short_model(display_name: &str) -> String {
     display_name.to_string()
 }
 
-/// 模型强度色：Opus 紫红 / Sonnet 紫蓝 / Haiku 青蓝 / 其他灰
-/// 用 contains 而非 == 以兼容带版本号的 display_name（如 "Opus 4.7 1M"）
+/// 模型强度色：Fable 金 / Opus 紫红 / Sonnet 紫蓝 / Haiku 青蓝 / 其他灰
 fn model_block_bg(name: &str) -> u8 {
-    if name.contains("Opus") {
-        BG_MODEL_OPUS
-    } else if name.contains("Sonnet") {
-        BG_MODEL_SONNET
-    } else if name.contains("Haiku") {
-        BG_MODEL_HAIKU
-    } else {
-        BG_MODEL_OTHER
+    use crate::input::ModelTier;
+    match ModelTier::from_display_name(name) {
+        ModelTier::Fable => BG_MODEL_FABLE,
+        ModelTier::Opus => BG_MODEL_OPUS,
+        ModelTier::Sonnet => BG_MODEL_SONNET,
+        ModelTier::Haiku => BG_MODEL_HAIKU,
+        ModelTier::Other => BG_MODEL_OTHER,
     }
 }
 
@@ -335,6 +334,18 @@ fn format_credits(amount: f64) -> String {
         format!("{:.1}K", amount / 1_000.0)
     } else {
         format!("{amount:.0}")
+    }
+}
+
+fn format_cost_usd(v: f64) -> String {
+    if !v.is_finite() || v < 0.01 {
+        "$0".to_string()
+    } else if v < 10.0 {
+        format!("${v:.2}")
+    } else if v < 100.0 {
+        format!("${v:.1}")
+    } else {
+        format!("${}", format_credits(v))
     }
 }
 
@@ -469,6 +480,15 @@ fn render_mini(ctx: &RenderContext) {
     if ctx.config.display.edit_stats {
         if let Some((added, removed)) = edit_stats_parts(&ctx.stdin) {
             identity.push(stats_block(&added, &removed));
+        }
+    }
+
+    // 会话累计费用
+    if ctx.config.display.session_cost {
+        if let Some(cost) = ctx.stdin.cost.as_ref().and_then(|c| c.total_cost_usd) {
+            if cost > 0.0 {
+                identity.push(block(BG_STATS, FG_DARK, &format_cost_usd(cost)));
+            }
         }
     }
 
@@ -620,6 +640,31 @@ mod tests {
             out.push(c);
         }
         out
+    }
+
+    #[test]
+    fn cost_usd_format() {
+        assert_eq!(format_cost_usd(0.0), "$0");
+        assert_eq!(format_cost_usd(0.005), "$0");
+        assert_eq!(format_cost_usd(0.42), "$0.42");
+        assert_eq!(format_cost_usd(1.5), "$1.50");
+        assert_eq!(format_cost_usd(9.99), "$9.99");
+        assert_eq!(format_cost_usd(12.34), "$12.3");
+        assert_eq!(format_cost_usd(99.9), "$99.9");
+        assert_eq!(format_cost_usd(123.4), "$123");
+        assert_eq!(format_cost_usd(1234.0), "$1.2K");
+        assert_eq!(format_cost_usd(f64::NAN), "$0");
+    }
+
+    #[test]
+    fn model_block_bg_classification() {
+        assert_eq!(model_block_bg("Fable 5"), BG_MODEL_FABLE);
+        assert_eq!(model_block_bg("Opus 4.8 1M"), BG_MODEL_OPUS);
+        assert_eq!(model_block_bg("Opus 4.7 1M"), BG_MODEL_OPUS);
+        assert_eq!(model_block_bg("Sonnet 5"), BG_MODEL_SONNET);
+        assert_eq!(model_block_bg("Sonnet 4.6"), BG_MODEL_SONNET);
+        assert_eq!(model_block_bg("Haiku 4.5"), BG_MODEL_HAIKU);
+        assert_eq!(model_block_bg("GLM-4.5"), BG_MODEL_OTHER);
     }
 
     #[test]

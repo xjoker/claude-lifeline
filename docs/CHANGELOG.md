@@ -4,7 +4,22 @@ All notable changes to claude-lifeline will be documented in this file.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-02
+
 ### Added
+- **Fable model tier** — new top-tier model family with gold (#178) background.
+  Model hierarchy is now Fable > Opus > Sonnet > Haiku. Shared `ModelTier`
+  enum in `input.rs` eliminates duplicated classification logic between
+  ANSI and JSON renderers.
+- **Session cost display** (opt-in via `display.session_cost`) — renders
+  `$0.42` from Claude Code's `cost.total_cost_usd` field. Compact formatting:
+  `$0.42` / `$12.3` / `$1.2K`. Hidden when cost is zero or the field is absent.
+- **Claude Code version in JSON** — `--json` output now includes
+  `claude_code_version` from stdin, useful for diagnostics and scripted
+  consumers.
+- **Orphaned file cleanup** — `claude-lifeline doctor` now detects and removes
+  `cache-ttl-*`, `cache-decisions.*`, and `ttl-samples.*` files left behind
+  by features removed in 0.2.0.
 - `CLAUDE_CONFIG_DIR` environment variable is now honored — the same env var
   Claude Code itself reads. When set to a non-empty value, every derived path
   (`projects/`, `claude-lifeline/`, `.credentials.json`) re-roots there.
@@ -30,6 +45,10 @@ All notable changes to claude-lifeline will be documented in this file.
   `{ direction, short_burn_per_sec, long_burn_per_sec, sample_count, confident }`
   for every quota window, regardless of ANSI display threshold — JSON
   consumers see the data even when the ANSI renderer suppresses the glyph.
+- **CI workflow** — push/PR to master/dev now runs `cargo test` + `cargo clippy`
+  and cross-platform `cargo check` (macOS, Linux musl, Windows).
+- **Auto-release** — pushing a `Cargo.toml` version bump to master automatically
+  creates a git tag and triggers the release build pipeline.
 
 ### Changed
 - **TUI scope narrowed.** The Sessions and Usage tabs added in 0.4.0 have been
@@ -41,6 +60,13 @@ All notable changes to claude-lifeline will be documented in this file.
 - `data::session::SessionSummary` trimmed to the fields current callers
   actually read (session_id, project_dir, started_at, model). Token totals
   and message counts can come back when a future feature needs them.
+- Release workflow now uses `Swatinem/rust-cache@v2` for faster builds and
+  installs `cross` with `--locked` instead of `--git` for reproducibility.
+
+### Dependencies
+- Updated 48 transitive dependencies (all published >7 days to mitigate
+  supply-chain risk). Pinned `anyhow` at 1.0.102 and `rustls-pki-types` at
+  1.14.0 (newer versions not yet past the 7-day threshold).
 
 ## [0.4.0] - 2026-05-16
 

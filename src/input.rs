@@ -28,7 +28,6 @@ pub struct WorkspaceInfo {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 pub struct CostInfo {
     pub total_cost_usd: Option<f64>,
     pub total_lines_added: Option<u64>,
@@ -99,6 +98,43 @@ pub fn get_model_name(stdin: &StdinData) -> String {
 /// 用于所有从外部读取、最终进入 ANSI 输出流的字符串
 pub fn sanitize_external(s: &str) -> String {
     s.chars().filter(|c| !c.is_control()).collect()
+}
+
+// ── 模型 tier 分类（供 render / json_render 共用） ──
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelTier {
+    Fable,
+    Opus,
+    Sonnet,
+    Haiku,
+    Other,
+}
+
+impl ModelTier {
+    pub fn from_display_name(name: &str) -> Self {
+        if name.contains("Fable") {
+            Self::Fable
+        } else if name.contains("Opus") {
+            Self::Opus
+        } else if name.contains("Sonnet") {
+            Self::Sonnet
+        } else if name.contains("Haiku") {
+            Self::Haiku
+        } else {
+            Self::Other
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Fable => "fable",
+            Self::Opus => "opus",
+            Self::Sonnet => "sonnet",
+            Self::Haiku => "haiku",
+            Self::Other => "other",
+        }
+    }
 }
 
 /// 获取 context 使用百分比（优先 native，回退手动计算）

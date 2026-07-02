@@ -13,6 +13,7 @@ edit_stats     = true   # 代码改动量 +X -Y（仅当 session 有增删时渲
 subscription   = false  # 从 OAuth 凭证读取订阅徽章（MAX·20x / MAX·5x / PRO / FREE 等）
 seven_day_opus = false  # Opus 7d 子配额块（O:U/P%!，仅在 Opus 用量超速时出现）
 extra_usage    = false  # 月度付费扩容池块（账户未开通扩容时自动隐藏）
+session_cost   = false  # 会话累计费用（$X.XX，仅 cost > 0 时渲染）
 
 # 颜色切换阈值（可选；缺省使用下列默认值）
 # 校验规则：yellow 必须 < red，且都在 [0, 100]；不合法时该对回退默认

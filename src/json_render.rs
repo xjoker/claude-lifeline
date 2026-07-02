@@ -23,9 +23,13 @@ pub fn build(ctx: &RenderContext) -> Value {
     let subscription = subscription_value(ctx);
     let extra_usage = extra_usage_value(ctx);
 
+    let session_cost = ctx.stdin.cost.as_ref().and_then(|c| c.total_cost_usd);
+    let cc_version = ctx.stdin.version.as_deref();
+
     json!({
         "schema_version": 1,
         "lifeline_version": env!("CARGO_PKG_VERSION"),
+        "claude_code_version": cc_version,
         "timestamp": chrono::Utc::now().to_rfc3339(),
         "model": {
             "display_name": model_name,
@@ -38,20 +42,13 @@ pub fn build(ctx: &RenderContext) -> Value {
         "quotas": quotas,
         "subscription": subscription,
         "extra_usage": extra_usage,
+        "session_cost": session_cost,
         "update_hint": ctx.update_hint,
     })
 }
 
 fn model_tier(display_name: &str) -> &'static str {
-    if display_name.contains("Opus") {
-        "opus"
-    } else if display_name.contains("Sonnet") {
-        "sonnet"
-    } else if display_name.contains("Haiku") {
-        "haiku"
-    } else {
-        "other"
-    }
+    crate::input::ModelTier::from_display_name(display_name).as_str()
 }
 
 fn project_value(ctx: &RenderContext) -> Value {
@@ -275,7 +272,10 @@ mod tests {
 
     #[test]
     fn model_tier_classification() {
+        assert_eq!(model_tier("Fable 5"), "fable");
+        assert_eq!(model_tier("Opus 4.8 1M"), "opus");
         assert_eq!(model_tier("Opus 4.7 1M"), "opus");
+        assert_eq!(model_tier("Sonnet 5"), "sonnet");
         assert_eq!(model_tier("Sonnet 4.6"), "sonnet");
         assert_eq!(model_tier("Haiku 4.5"), "haiku");
         assert_eq!(model_tier("GLM-4.5"), "other");
@@ -313,6 +313,7 @@ mod tests {
         assert_eq!(
             keys,
             vec![
+                "claude_code_version",
                 "context",
                 "edits",
                 "extra_usage",
@@ -322,6 +323,7 @@ mod tests {
                 "project",
                 "quotas",
                 "schema_version",
+                "session_cost",
                 "subscription",
                 "timestamp",
                 "update_hint",

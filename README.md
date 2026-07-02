@@ -9,7 +9,7 @@ Most status bars show you a percentage. claude-lifeline tells you whether that p
 ## Preview
 
 ```
- Opus 4.7 1M  claude-lifeline  master  +95 -442  ctx 21%  3/28%  63/68%  S:87/68%! →5/13 16:08 ↓1d8h
+ Sonnet 5  claude-lifeline  master  +95 -442  ctx 21%  3/28%  63/68%  S:87/68%! →5/13 16:08 ↓1d8h
                                                                           ▲         ▲           ▲
                                                                   Over-pace `!`  Depletion ETA  Recovery wait
 ```
@@ -45,7 +45,7 @@ The trend arrow uses two EWMAs — a short half-life that tracks "what's happeni
 - **Context window** % with green / yellow / red bands
 - **Git** branch + dirty + ahead/behind upstream
 - **Edit stats** (`+lines / -lines`) from Claude Code's session counter
-- **Model** with intensity-coded background (Opus / Sonnet / Haiku)
+- **Model** with intensity-coded background (Fable / Opus / Sonnet / Haiku)
 - Auto-detect over-pace **Sonnet** sub-quota (`S:U/P%!`) — silent otherwise
 
 ### Optional (opt-in via config)
@@ -164,16 +164,16 @@ curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/insta
 A compact single-line bar with everything inline as colored blocks.
 
 ```
- Opus 4.7 1M  claude-lifeline  master  +95 -442  ctx 21%  3/28%  63/68%  S:87/68%! →5/13 16:08 ↓1d8h
- ^^^^^^^^^^^  ^^^^^^^^^^^^^^^  ^^^^^^  ^^^^^^^^  ^^^^^^^  ^^^^^  ^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^^
- Model        Project          Git     Edits     Context  5h     7d      Sonnet 7d (over-pace only)
+ Sonnet 5  claude-lifeline  master  +95 -442  ctx 21%  3/28%  63/68%  S:87/68%! →5/13 16:08 ↓1d8h
+ ^^^^^^^^  ^^^^^^^^^^^^^^^  ^^^^^^  ^^^^^^^^  ^^^^^^^  ^^^^^  ^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Model     Project          Git     Edits     Context  5h     7d      Sonnet 7d (over-pace only)
 ```
 
 ### Block breakdown
 
 | Block | Content | Background |
 |-------|---------|------------|
-| Model | `Opus 4.7` / `Sonnet 4.6` / `Haiku 4.5` / `Opus 4.7 1M` etc. | **Intensity-coded** — see table below |
+| Model | `Fable 5` / `Opus 4.8` / `Sonnet 5` / `Haiku 4.5` etc. | **Intensity-coded** — see table below |
 | Project | `cwd` basename, truncated to 16 cols with `..` if longer | Cadet teal |
 | Git | `branch[*][ ↑N][ ↓N]` — branch name truncated to 16 cols | Warm orange |
 | Edits | `+lines_added -lines_removed` from Claude Code's session counter | Neutral gray |
@@ -190,7 +190,8 @@ The model block hue reflects tier:
 
 | Model | Background | Meaning |
 |-------|-----------|---------|
-| `Opus` | Violet-magenta (256 #134) | Flagship — most capable |
+| `Fable` | Gold (256 #178) | Apex — highest tier |
+| `Opus` | Violet-magenta (256 #134) | Flagship |
 | `Sonnet` | Violet (256 #99) | Balanced |
 | `Haiku` | Cyan (256 #38) | Light & fast |
 | Other / unknown | Gray (256 #102) | Fallback |

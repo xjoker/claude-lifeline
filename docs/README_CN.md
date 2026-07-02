@@ -11,7 +11,7 @@
 ![claude-lifeline mini 布局](img-mini.png)
 
 ```
- Opus 4.7 1M  claude-lifeline  master  +95 -442  ctx 21%  100% 3m19s  3/28%  63/68%  S:87/68%! →5/13 16:08 ↓1d8h
+ Sonnet 5  claude-lifeline  master  +95 -442  ctx 21%  100% 3m19s  3/28%  63/68%  S:87/68%! →5/13 16:08 ↓1d8h
 ```
 
 ## 为什么用 claude-lifeline？
@@ -149,16 +149,16 @@ curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/insta
 紧凑单行色块，全部信息内联。
 
 ```
- Opus 4.7 1M  claude-lifeline  master  +95 -442  ctx 21%  3/28%  63/68%  S:87/68%! →5/13 16:08 ↓1d8h
- ^^^^^^^^^^^  ^^^^^^^^^^^^^^^  ^^^^^^  ^^^^^^^^  ^^^^^^^  ^^^^^  ^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^^
- 模型         项目             Git     编辑量    Context  5h     7d      Sonnet 7d（仅超速时出现）
+ Sonnet 5  claude-lifeline  master  +95 -442  ctx 21%  3/28%  63/68%  S:87/68%! →5/13 16:08 ↓1d8h
+ ^^^^^^^^  ^^^^^^^^^^^^^^^  ^^^^^^  ^^^^^^^^  ^^^^^^^  ^^^^^  ^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^^
+ 模型      项目             Git     编辑量    Context  5h     7d      Sonnet 7d（仅超速时出现）
 ```
 
 ### 块说明
 
 | 块 | 内容 | 底色 |
 |-----|------|------|
-| 模型 | `Opus 4.7` / `Sonnet 4.6` / `Haiku 4.5` / `Opus 4.7 1M` 等 | **按强度配色**——见下表 |
+| 模型 | `Fable 5` / `Opus 4.8` / `Sonnet 5` / `Haiku 4.5` 等 | **按强度配色**——见下表 |
 | 项目 | `cwd` basename，截断到 16 列，超出用 `..` | 灰青 |
 | Git | `分支[*][ ↑N][ ↓N]`——分支名截断到 16 列 | 暖橙 |
 | 编辑量 | `+lines_added -lines_removed`，来自 Claude Code 会话计数器 | 中性灰 |
@@ -175,6 +175,7 @@ curl -fsSL https://raw.githubusercontent.com/xjoker/claude-lifeline/master/insta
 
 | 模型 | 底色 | 意义 |
 |------|------|------|
+| `Fable` | 金色（256 #178） | 顶级 |
 | `Opus` | 紫红（256 #134） | 旗舰 |
 | `Sonnet` | 紫蓝（256 #99） | 平衡 |
 | `Haiku` | 青蓝（256 #38） | 轻快 |
