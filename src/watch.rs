@@ -23,17 +23,20 @@ pub async fn run(session_id: Option<String>) -> anyhow::Result<()> {
             .and_then(|p| Path::new(p).file_name())
             .and_then(|n| n.to_str())
             .unwrap_or("?");
+        let session_id = sanitize_transcript(&s.session_id);
+        let model = sanitize_transcript(s.model.as_deref().unwrap_or("?"));
+        let project = sanitize_transcript(project);
         println!(
             "▶ {} · {} · {} · started {}",
-            s.session_id,
-            s.model.as_deref().unwrap_or("?"),
+            session_id,
+            model,
             project,
             s.started_at
                 .map(|t| t.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M:%S").to_string())
                 .unwrap_or_else(|| "—".into()),
         );
     } else {
-        println!("▶ watching {}", target.display());
+        println!("▶ watching {}", sanitize_transcript(&target.display().to_string()));
     }
     println!("─ following new entries (Ctrl-C to exit) ─");
 
@@ -183,20 +186,27 @@ fn render_line(line: &str) {
                 .and_then(|m| m.content.as_ref())
                 .and_then(extract_text);
             if let Some(msg) = user_text {
-                println!("{stamp} \x1b[36m›\x1b[0m {}", truncate(&msg, 280));
+                println!("{stamp} \x1b[36m›\x1b[0m {}", truncate(&sanitize_transcript(&msg), 280));
             } else if let Some(result) = entry.tool_use_result.as_ref() {
                 let summary = summarize_tool_result(result);
-                println!("{stamp} \x1b[90m  ◀ {}\x1b[0m", truncate(&summary, 220));
+                println!(
+                    "{stamp} \x1b[90m  ◀ {}\x1b[0m",
+                    truncate(&sanitize_transcript(&summary), 220)
+                );
             }
         }
         Some("assistant") => {
             let content = entry.message.as_ref().and_then(|m| m.content.as_ref());
             if let Some(text) = content.and_then(extract_text) {
-                println!("{stamp} \x1b[35m‹\x1b[0m {}", truncate(&text, 280));
+                println!("{stamp} \x1b[35m‹\x1b[0m {}", truncate(&sanitize_transcript(&text), 280));
             }
             if let Some(uses) = content.and_then(extract_tool_uses) {
                 for u in &uses {
-                    println!("{stamp} \x1b[33m  ⚡ {}\x1b[0m {}", u.0, truncate(&u.1, 200));
+                    println!(
+                        "{stamp} \x1b[33m  ⚡ {}\x1b[0m {}",
+                        sanitize_transcript(&u.0),
+                        truncate(&sanitize_transcript(&u.1), 200)
+                    );
                 }
             }
             if let Some(usage) = entry.message.as_ref().and_then(|m| m.usage.as_ref()) {
@@ -315,4 +325,22 @@ fn truncate(s: &str, max: usize) -> String {
     let mut out: String = s.chars().take(keep).collect();
     out.push('…');
     out
+}
+
+fn sanitize_transcript(s: &str) -> String {
+    let visible_lines = s.replace(['\r', '\n'], "⏎");
+    crate::input::sanitize_external(&visible_lines)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn transcript_text_strips_ansi_osc_and_c1_controls() {
+        let hostile = "safe\x1b[31mred\x1b[0m\x1b]52;c;secret\x07\u{009b}tail\nnext";
+        let cleaned = sanitize_transcript(hostile);
+        assert_eq!(cleaned, "safe[31mred[0m]52;c;secrettail⏎next");
+        assert!(!cleaned.chars().any(char::is_control));
+    }
 }

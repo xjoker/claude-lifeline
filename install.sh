@@ -6,8 +6,8 @@ INSTALL_DIR="$HOME/.claude/bin"
 BIN_NAME="claude-lifeline"
 SETTINGS="$HOME/.claude/settings.json"
 STATUS_LINE_CMD="~/.claude/bin/claude-lifeline"
-# refreshInterval=15 让 cache TTL 倒计时和 quota ETA 接近实时（CC 默认事件驱动，
-# idle 时不刷新）。15s 在视觉流畅度和 CPU 开销之间取平衡（statusline 单跑约 30ms）
+# refreshInterval=15 让 statusline 在 idle 时也能及时刷新。
+# 15s 在视觉流畅度和 CPU 开销之间取平衡（statusline 单跑约 30ms）
 DEFAULT_REFRESH_INTERVAL=15
 STATUS_LINE_JSON='{"type":"command","command":"~/.claude/bin/claude-lifeline","refreshInterval":15}'
 
@@ -15,8 +15,47 @@ STATUS_LINE_JSON='{"type":"command","command":"~/.claude/bin/claude-lifeline","r
 
 has_jq() { command -v jq &>/dev/null; }
 
-settings_add() {
-  cp "$SETTINGS" "$SETTINGS.bak"
+settings_backup() {
+  local BACKUP LOCK
+  BACKUP="$SETTINGS.backup-$(date +%Y%m%d-%H%M%S)"
+  LOCK="$BACKUP.lock"
+  while true; do
+    if mkdir "$LOCK" 2>/dev/null; then
+      if [ ! -e "$BACKUP" ]; then
+        break
+      fi
+      rmdir "$LOCK"
+    fi
+    sleep 1
+    BACKUP="$SETTINGS.backup-$(date +%Y%m%d-%H%M%S)"
+    LOCK="$BACKUP.lock"
+  done
+  if ! cp "$SETTINGS" "$BACKUP"; then
+    rmdir "$LOCK"
+    return 1
+  fi
+  rmdir "$LOCK"
+  printf '%s\n' "$BACKUP"
+}
+
+cleanup_settings_backups() {
+  local BACKUPS=("$SETTINGS".backup-*)
+  [ -e "${BACKUPS[0]}" ] || return
+  local REMOVE_COUNT=$((${#BACKUPS[@]} - 5))
+  if [ "$REMOVE_COUNT" -gt 0 ]; then
+    local INDEX
+    for ((INDEX = 0; INDEX < REMOVE_COUNT; INDEX++)); do
+      rm -f -- "${BACKUPS[$INDEX]}"
+    done
+    echo "Removed $REMOVE_COUNT old settings.json backup(s); retained 5"
+  fi
+}
+
+settings_add() (
+  local BACKUP TMP_SETTINGS
+  BACKUP=$(settings_backup)
+  TMP_SETTINGS=$(mktemp "$(dirname "$SETTINGS")/.settings.json.update.XXXXXX")
+  trap 'rm -f "$TMP_SETTINGS"' EXIT
   if has_jq; then
     # 保留用户已有的 refreshInterval（如果他们手动调过），否则用默认 15s
     jq --arg cmd "$STATUS_LINE_CMD" --argjson def "$DEFAULT_REFRESH_INTERVAL" '
@@ -25,34 +64,42 @@ settings_add() {
         command: $cmd,
         refreshInterval: (.statusLine.refreshInterval // $def)
       })
-    ' "$SETTINGS.bak" > "$SETTINGS"
+    ' "$BACKUP" > "$TMP_SETTINGS"
   else
     # sed fallback: 区分空对象 {} 与已有键的情况
     #   空对象：`{,"statusLine":...}` 会是无效 JSON，需要不带逗号的形式
     #   有键：在最后 } 前插入 `,"statusLine":...`
-    if grep -q '"' "$SETTINGS"; then
-      sed -i.tmp "s|}[[:space:]]*\$|,\"statusLine\":{\"type\":\"command\",\"command\":\"$STATUS_LINE_CMD\",\"refreshInterval\":$DEFAULT_REFRESH_INTERVAL}}|" "$SETTINGS"
+    cp "$BACKUP" "$TMP_SETTINGS"
+    if grep -q '"' "$TMP_SETTINGS"; then
+      sed -i.tmp "s|}[[:space:]]*\$|,\"statusLine\":{\"type\":\"command\",\"command\":\"$STATUS_LINE_CMD\",\"refreshInterval\":$DEFAULT_REFRESH_INTERVAL}}|" "$TMP_SETTINGS"
     else
-      printf '{"statusLine":{"type":"command","command":"%s","refreshInterval":%d}}\n' "$STATUS_LINE_CMD" "$DEFAULT_REFRESH_INTERVAL" > "$SETTINGS"
+      printf '{"statusLine":{"type":"command","command":"%s","refreshInterval":%d}}\n' "$STATUS_LINE_CMD" "$DEFAULT_REFRESH_INTERVAL" > "$TMP_SETTINGS"
     fi
-    rm -f "$SETTINGS.tmp"
+    rm -f "$TMP_SETTINGS.tmp"
   fi
-  echo "Updated settings.json (backup: settings.json.bak)"
-}
+  mv -f "$TMP_SETTINGS" "$SETTINGS"
+  cleanup_settings_backups
+  echo "Updated settings.json (backup: $(basename "$BACKUP"))"
+)
 
-settings_remove() {
+settings_remove() (
   if ! grep -q '"statusLine"' "$SETTINGS" 2>/dev/null; then
     echo "No statusLine config found in settings.json"
     return
   fi
-  cp "$SETTINGS" "$SETTINGS.bak"
-  if has_jq; then
-    jq 'del(.statusLine)' "$SETTINGS.bak" > "$SETTINGS"
-  else
-    echo "Warning: jq not found. Please manually remove \"statusLine\" from $SETTINGS"
+  if ! has_jq; then
+    echo "Error: jq is required to safely remove \"statusLine\" from $SETTINGS" >&2
+    return 1
   fi
-  echo "Removed statusLine from settings.json (backup: settings.json.bak)"
-}
+  local BACKUP TMP_SETTINGS
+  BACKUP=$(settings_backup)
+  TMP_SETTINGS=$(mktemp "$(dirname "$SETTINGS")/.settings.json.update.XXXXXX")
+  trap 'rm -f "$TMP_SETTINGS"' EXIT
+  jq 'del(.statusLine)' "$BACKUP" > "$TMP_SETTINGS"
+  mv -f "$TMP_SETTINGS" "$SETTINGS"
+  cleanup_settings_backups
+  echo "Removed statusLine from settings.json (backup: $(basename "$BACKUP"))"
+)
 
 settings_has() {
   # 仅当 command 匹配 AND refreshInterval 已存在时才认为"已配置"。
@@ -127,16 +174,60 @@ do_install() {
 
 _download_binary() {
   local LATEST="$1" TARGET="$2" OS="$3"
-  local URL="https://github.com/$REPO/releases/download/$LATEST/$BIN_NAME-$TARGET"
+  local ASSET_NAME="$BIN_NAME-$TARGET"
+  local URL="https://github.com/$REPO/releases/download/$LATEST/$ASSET_NAME"
+  local CHECKSUMS_URL="https://github.com/$REPO/releases/download/$LATEST/SHA256SUMS"
   echo "Downloading $LATEST for $TARGET..."
   mkdir -p "$INSTALL_DIR"
-  curl -fsSL "$URL" -o "$INSTALL_DIR/$BIN_NAME"
-  chmod +x "$INSTALL_DIR/$BIN_NAME"
-  # macOS: 移除 Gatekeeper 隔离标记
-  if [ "$OS" = "darwin" ]; then
-    xattr -d com.apple.quarantine "$INSTALL_DIR/$BIN_NAME" 2>/dev/null || true
-  fi
-  echo "Installed to $INSTALL_DIR/$BIN_NAME"
+  (
+    local TMP_BINARY="" TMP_CHECKSUMS="" EXPECTED ACTUAL
+    cleanup_download() { rm -f "$TMP_BINARY" "$TMP_CHECKSUMS"; }
+    trap cleanup_download EXIT HUP INT TERM
+
+    TMP_BINARY=$(mktemp "$INSTALL_DIR/.$BIN_NAME.download.XXXXXX")
+    TMP_CHECKSUMS=$(mktemp "$INSTALL_DIR/.SHA256SUMS.download.XXXXXX")
+    curl -fsSL "$URL" -o "$TMP_BINARY"
+    curl -fsSL "$CHECKSUMS_URL" -o "$TMP_CHECKSUMS"
+
+    EXPECTED=$(awk -v asset="$ASSET_NAME" '
+      $2 == asset {
+        count++
+        if (NF == 2 && length($1) == 64 && $1 ~ /^[[:xdigit:]]+$/) {
+          digest = tolower($1)
+        } else {
+          invalid = 1
+        }
+      }
+      END {
+        if (count == 1 && !invalid) print digest
+        else exit 1
+      }
+    ' "$TMP_CHECKSUMS") || {
+      echo "Error: SHA256SUMS has no single valid entry for $ASSET_NAME" >&2
+      exit 1
+    }
+
+    if command -v shasum >/dev/null 2>&1; then
+      ACTUAL=$(shasum -a 256 "$TMP_BINARY" | awk '{print tolower($1)}')
+    elif command -v sha256sum >/dev/null 2>&1; then
+      ACTUAL=$(sha256sum "$TMP_BINARY" | awk '{print tolower($1)}')
+    else
+      echo "Error: shasum or sha256sum is required to verify downloads" >&2
+      exit 1
+    fi
+    if [ "$ACTUAL" != "$EXPECTED" ]; then
+      echo "Error: SHA-256 mismatch for $ASSET_NAME" >&2
+      exit 1
+    fi
+
+    chmod +x "$TMP_BINARY"
+    # macOS: 移除 Gatekeeper 隔离标记
+    if [ "$OS" = "darwin" ]; then
+      xattr -d com.apple.quarantine "$TMP_BINARY" 2>/dev/null || true
+    fi
+    mv -f "$TMP_BINARY" "$INSTALL_DIR/$BIN_NAME"
+    echo "Installed to $INSTALL_DIR/$BIN_NAME"
+  )
 }
 
 # ── 命令解析 ──
@@ -158,8 +249,11 @@ case "$ACTION" in
     ;;
   uninstall)
     echo "Uninstalling claude-lifeline..."
-    rm -f "$INSTALL_DIR/$BIN_NAME"
     [ -f "$SETTINGS" ] && settings_remove
+    if [ -f "$INSTALL_DIR/$BIN_NAME" ]; then
+      rm -f "$INSTALL_DIR/$BIN_NAME"
+      echo "Removed $INSTALL_DIR/$BIN_NAME"
+    fi
     echo "Done! Restart Claude Code to apply."
     exit 0
     ;;

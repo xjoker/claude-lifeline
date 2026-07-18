@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use crossterm::execute;
+use crossterm::cursor::Show;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
@@ -38,6 +39,25 @@ pub struct AppState {
     pub config_cursor: usize,
     pub update_hint: Option<String>,
     pub should_quit: bool,
+}
+
+#[derive(Default)]
+struct TerminalGuard {
+    raw_mode: bool,
+    alternate_screen: bool,
+}
+
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        if self.raw_mode {
+            disable_raw_mode().ok();
+        }
+        let mut stdout = io::stdout();
+        if self.alternate_screen {
+            execute!(stdout, LeaveAlternateScreen).ok();
+        }
+        execute!(stdout, Show).ok();
+    }
 }
 
 impl AppState {
@@ -76,21 +96,22 @@ impl AppState {
 }
 
 pub async fn run() -> anyhow::Result<()> {
+    let mut guard = TerminalGuard { raw_mode: true, alternate_screen: false };
     enable_raw_mode()?;
     let mut stdout = io::stdout();
+    guard.alternate_screen = true;
     execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let result = main_loop(&mut terminal).await;
-
-    disable_raw_mode().ok();
-    execute!(terminal.backend_mut(), LeaveAlternateScreen).ok();
-    terminal.show_cursor().ok();
-    result
+    main_loop(&mut terminal).await
 }
 
-async fn main_loop<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> anyhow::Result<()> {
+async fn main_loop<B>(terminal: &mut Terminal<B>) -> anyhow::Result<()>
+where
+    B: ratatui::backend::Backend,
+    B::Error: Send + Sync + 'static,
+{
     let mut state = AppState::load().await;
 
     loop {

@@ -166,14 +166,8 @@ pub async fn get_usage_data(rate_limits: Option<&RateLimits>) -> UsageData {
                 rl.seven_day.as_ref().map(|w| w.used_percentage),
             );
         }
-        let five_hour = rl.five_hour.as_ref().map(|w| WindowUsage {
-            used_percent: w.used_percentage.unwrap_or(0.0),
-            resets_at: w.resets_at.as_ref().and_then(parse_resets_at),
-        });
-        let seven_day = rl.seven_day.as_ref().map(|w| WindowUsage {
-            used_percent: w.used_percentage.unwrap_or(0.0),
-            resets_at: w.resets_at.as_ref().and_then(parse_resets_at),
-        });
+        let five_hour = rl.five_hour.as_ref().and_then(window_from_stdin);
+        let seven_day = rl.seven_day.as_ref().and_then(window_from_stdin);
 
         let has_data = five_hour.is_some() || seven_day.is_some();
         if has_data {
@@ -365,7 +359,7 @@ fn cache_within_ttl(cache: &CacheFile) -> bool {
 
 /// 把单个窗口的 (pct, resets_at_str) 转 WindowUsage，过滤已过期窗口
 fn window_from_cache(pct: Option<f64>, resets_at: Option<&str>) -> Option<WindowUsage> {
-    let pct = pct?;
+    let pct = valid_percentage(pct?)?;
     let resets_at = resets_at
         .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
         .map(|dt| dt.with_timezone(&Utc));
@@ -376,6 +370,66 @@ fn window_from_cache(pct: Option<f64>, resets_at: Option<&str>) -> Option<Window
         }
     }
     Some(WindowUsage { used_percent: pct, resets_at })
+}
+
+fn valid_percentage(value: f64) -> Option<f64> {
+    (value.is_finite() && (0.0..=100.0).contains(&value)).then_some(value)
+}
+
+fn window_from_stdin(window: &crate::input::RateLimitWindow) -> Option<WindowUsage> {
+    Some(WindowUsage {
+        used_percent: valid_percentage(window.used_percentage?)?,
+        resets_at: window.resets_at.as_ref().and_then(parse_resets_at),
+    })
+}
+
+fn window_from_api(window: ApiWindow) -> Option<WindowUsage> {
+    Some(WindowUsage {
+        used_percent: valid_percentage(window.utilization?)?,
+        resets_at: window
+            .resets_at
+            .as_deref()
+            .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+            .map(|dt| dt.with_timezone(&Utc)),
+    })
+}
+
+fn extra_from_api(extra: ApiExtraUsage) -> Option<ExtraUsage> {
+    if !extra.is_enabled {
+        return None;
+    }
+    let monthly_limit = extra.monthly_limit?;
+    let used_credits = extra.used_credits?;
+    let utilization = extra.utilization?;
+    if !monthly_limit.is_finite()
+        || monthly_limit < 0.0
+        || !used_credits.is_finite()
+        || used_credits < 0.0
+    {
+        return None;
+    }
+    Some(ExtraUsage {
+        monthly_limit,
+        used_credits,
+        utilization: valid_percentage(utilization)?,
+        currency: extra.currency.unwrap_or_else(|| "USD".to_string()),
+    })
+}
+
+fn usage_from_api(api_resp: ApiUsageResponse) -> Option<UsageData> {
+    let usage = UsageData {
+        five_hour: api_resp.five_hour.and_then(window_from_api),
+        seven_day: api_resp.seven_day.and_then(window_from_api),
+        seven_day_sonnet: api_resp.seven_day_sonnet.and_then(window_from_api),
+        seven_day_opus: api_resp.seven_day_opus.and_then(window_from_api),
+        extra_usage: api_resp.extra_usage.and_then(extra_from_api),
+    };
+    (usage.five_hour.is_some()
+        || usage.seven_day.is_some()
+        || usage.seven_day_sonnet.is_some()
+        || usage.seven_day_opus.is_some()
+        || usage.extra_usage.is_some())
+    .then_some(usage)
 }
 
 fn sonnet_from_cache(cached: &CachedUsage) -> Option<WindowUsage> {
@@ -443,68 +497,65 @@ async fn fetch_usage_from_api() -> Option<UsageData> {
 
     let api_resp: ApiUsageResponse = resp.json().await.ok()?;
 
-    let five_hour = api_resp.five_hour.map(|w| WindowUsage {
-        used_percent: w.utilization.unwrap_or(0.0),
-        resets_at: w
-            .resets_at
-            .as_deref()
-            .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
-            .map(|dt| dt.with_timezone(&Utc)),
-    });
-
-    let seven_day = api_resp.seven_day.map(|w| WindowUsage {
-        used_percent: w.utilization.unwrap_or(0.0),
-        resets_at: w
-            .resets_at
-            .as_deref()
-            .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
-            .map(|dt| dt.with_timezone(&Utc)),
-    });
-
-    let seven_day_sonnet = api_resp.seven_day_sonnet.map(|w| WindowUsage {
-        used_percent: w.utilization.unwrap_or(0.0),
-        resets_at: w
-            .resets_at
-            .as_deref()
-            .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
-            .map(|dt| dt.with_timezone(&Utc)),
-    });
-
-    let seven_day_opus = api_resp.seven_day_opus.map(|w| WindowUsage {
-        used_percent: w.utilization.unwrap_or(0.0),
-        resets_at: w
-            .resets_at
-            .as_deref()
-            .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
-            .map(|dt| dt.with_timezone(&Utc)),
-    });
-
-    let extra_usage = api_resp.extra_usage.and_then(|e| {
-        // is_enabled=false 时 monthly_limit/used_credits 字段可能仍存在，
-        // 但语义上扩容池没开通；丢弃以避免误展示
-        if !e.is_enabled {
-            return None;
-        }
-        Some(ExtraUsage {
-            monthly_limit: e.monthly_limit.unwrap_or(0.0),
-            used_credits: e.used_credits.unwrap_or(0.0),
-            utilization: e.utilization.unwrap_or(0.0),
-            currency: e.currency.unwrap_or_else(|| "USD".to_string()),
-        })
-    });
-
-    Some(UsageData {
-        five_hour,
-        seven_day,
-        seven_day_sonnet,
-        seven_day_opus,
-        extra_usage,
-    })
+    usage_from_api(api_resp)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stdin_window_rejects_missing_non_finite_and_out_of_range_usage() {
+        for used_percentage in [None, Some(f64::NAN), Some(f64::INFINITY), Some(-0.1), Some(100.1)] {
+            let window = crate::input::RateLimitWindow { used_percentage, resets_at: None };
+            assert!(window_from_stdin(&window).is_none());
+        }
+        assert_eq!(
+            window_from_stdin(&crate::input::RateLimitWindow {
+                used_percentage: Some(0.0),
+                resets_at: None,
+            })
+            .unwrap()
+            .used_percent,
+            0.0
+        );
+    }
+
+    #[test]
+    fn api_usage_rejects_invalid_windows_and_incomplete_extra_usage() {
+        let json = r#"{
+            "five_hour": {"utilization": null, "resets_at": null},
+            "seven_day": {"utilization": -1.0, "resets_at": null},
+            "seven_day_sonnet": {"utilization": 101.0, "resets_at": null},
+            "seven_day_opus": {"utilization": 50.0, "resets_at": null},
+            "extra_usage": {
+                "is_enabled": true,
+                "monthly_limit": 100.0,
+                "used_credits": null,
+                "utilization": 1.0,
+                "currency": "USD"
+            }
+        }"#;
+        let usage = usage_from_api(serde_json::from_str(json).unwrap()).unwrap();
+        assert!(usage.five_hour.is_none());
+        assert!(usage.seven_day.is_none());
+        assert!(usage.seven_day_sonnet.is_none());
+        assert_eq!(usage.seven_day_opus.unwrap().used_percent, 50.0);
+        assert!(usage.extra_usage.is_none());
+    }
+
+    #[test]
+    fn api_usage_returns_none_when_no_valid_field_exists() {
+        let json = r#"{
+            "five_hour": {"utilization": null, "resets_at": null},
+            "seven_day": null,
+            "seven_day_sonnet": null,
+            "seven_day_opus": null,
+            "extra_usage": {"is_enabled": true, "monthly_limit": -1.0,
+                "used_credits": 0.0, "utilization": 0.0, "currency": "USD"}
+        }"#;
+        assert!(usage_from_api(serde_json::from_str(json).unwrap()).is_none());
+    }
 
     /// 真实抓包样本（脱敏数值）：所有新字段都解出
     const FULL_API_RESPONSE: &str = r#"{
@@ -556,16 +607,7 @@ mod tests {
             utilization: Some(0.0),
             currency: Some("USD".into()),
         };
-        let kept = if !api.is_enabled {
-            None
-        } else {
-            Some(ExtraUsage {
-                monthly_limit: api.monthly_limit.unwrap_or(0.0),
-                used_credits: api.used_credits.unwrap_or(0.0),
-                utilization: api.utilization.unwrap_or(0.0),
-                currency: api.currency.unwrap_or_else(|| "USD".into()),
-            })
-        };
+        let kept = extra_from_api(api);
         assert!(kept.is_none());
     }
 

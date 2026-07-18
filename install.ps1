@@ -12,10 +12,49 @@ $BinName = "claude-lifeline.exe"
 $Settings = "$env:USERPROFILE\.claude\settings.json"
 $Target = "x86_64-pc-windows-msvc"
 $Action = if ($env:ACTION) { $env:ACTION } else { "install" }
-# refreshInterval=15 让 cache TTL 倒计时和 quota ETA 接近实时（CC 默认事件驱动，
-# idle 时不刷新）。15s 在视觉流畅度和 CPU 开销之间取平衡
+# refreshInterval=15 让 statusline 在 idle 时也能及时刷新。
+# 15s 在视觉流畅度和 CPU 开销之间取平衡
 $DefaultRefreshInterval = 15
 $StatusLineCmd = "~/.claude/bin/claude-lifeline"
+
+function New-SettingsBackup {
+    do {
+        $backup = "$Settings.backup-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+        $lock = "$backup.lock"
+        try {
+            $lockStream = [IO.File]::Open($lock, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+            if (Test-Path -LiteralPath $backup) {
+                $lockStream.Dispose()
+                Remove-Item -LiteralPath $lock -Force
+                $lockStream = $null
+                Start-Sleep -Seconds 1
+            }
+        } catch [IO.IOException] {
+            Start-Sleep -Seconds 1
+            $lockStream = $null
+        }
+    } while ($null -eq $lockStream)
+    try {
+        $lockStream.Dispose()
+        Copy-Item -LiteralPath $Settings -Destination $backup
+    } finally {
+        if ($lockStream) { $lockStream.Dispose() }
+        Remove-Item -LiteralPath $lock -Force -ErrorAction SilentlyContinue
+    }
+    return $backup
+}
+
+function Remove-OldSettingsBackups {
+    $parent = Split-Path $Settings
+    $prefix = "$(Split-Path $Settings -Leaf).backup-"
+    $oldBackups = @(Get-ChildItem -LiteralPath $parent -File | Where-Object {
+        $_.Name.StartsWith($prefix, [StringComparison]::Ordinal)
+    } | Sort-Object LastWriteTimeUtc -Descending | Select-Object -Skip 5)
+    if ($oldBackups.Count -gt 0) {
+        $oldBackups | Remove-Item -Force
+        Write-Host "Removed $($oldBackups.Count) old settings.json backup(s); retained 5"
+    }
+}
 
 function Set-StatusLineConfig {
     # 在 settings.json 中写入 statusLine。保留用户已有的 refreshInterval（如果手动调过）
@@ -37,7 +76,7 @@ function Set-StatusLineConfig {
         return
     }
 
-    Copy-Item $Settings "$Settings.bak"
+    $backup = New-SettingsBackup
     $existingInterval = if ($hasInterval) { $json.statusLine.refreshInterval } else { $DefaultRefreshInterval }
     $json | Add-Member -Force -MemberType NoteProperty -Name "statusLine" -Value @{
         type = "command"
@@ -45,7 +84,8 @@ function Set-StatusLineConfig {
         refreshInterval = $existingInterval
     }
     $json | ConvertTo-Json -Depth 10 | Set-Content $Settings -Encoding UTF8
-    Write-Host "Updated settings.json (backup: settings.json.bak)"
+    Remove-OldSettingsBackups
+    Write-Host "Updated settings.json (backup: $(Split-Path $backup -Leaf))"
 }
 
 # ── Install 流程：下载最新二进制 + 配 settings.json（幂等，等同 upgrade） ──
@@ -73,11 +113,34 @@ function Invoke-DoInstall {
     }
 
     if ($needDownload) {
-        $Url = "https://github.com/$Repo/releases/download/$Latest/claude-lifeline-$Target.exe"
+        $AssetName = "claude-lifeline-$Target.exe"
+        $Url = "https://github.com/$Repo/releases/download/$Latest/$AssetName"
+        $ChecksumsUrl = "https://github.com/$Repo/releases/download/$Latest/SHA256SUMS"
         Write-Host "Downloading $Latest..."
         New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
-        Invoke-WebRequest -Uri $Url -OutFile "$InstallDir\$BinName"
-        Write-Host "Installed to $InstallDir\$BinName"
+        $tempBinary = Join-Path $InstallDir ".$BinName.download.$([Guid]::NewGuid().ToString('N'))"
+        $tempChecksums = Join-Path $InstallDir ".SHA256SUMS.download.$([Guid]::NewGuid().ToString('N'))"
+        try {
+            Invoke-WebRequest -Uri $Url -OutFile $tempBinary
+            Invoke-WebRequest -Uri $ChecksumsUrl -OutFile $tempChecksums
+
+            $checksumLines = @(Get-Content $tempChecksums | Where-Object {
+                $_ -cmatch '^([0-9A-Fa-f]{64})  (.+)$' -and $Matches[2] -ceq $AssetName
+            })
+            if ($checksumLines.Count -ne 1 -or $checksumLines[0] -cnotmatch '^([0-9A-Fa-f]{64})  (.+)$') {
+                throw "SHA256SUMS has no single valid entry for $AssetName"
+            }
+            $expected = $Matches[1].ToLowerInvariant()
+            $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $tempBinary).Hash.ToLowerInvariant()
+            if ($actual -cne $expected) {
+                throw "SHA-256 mismatch for $AssetName"
+            }
+
+            Move-Item -LiteralPath $tempBinary -Destination "$InstallDir\$BinName" -Force
+            Write-Host "Installed to $InstallDir\$BinName"
+        } finally {
+            Remove-Item -LiteralPath $tempBinary, $tempChecksums -Force -ErrorAction SilentlyContinue
+        }
     }
 
     Set-StatusLineConfig
@@ -94,18 +157,19 @@ if ($Action -eq "mini" -or $Action -eq "standard") {
 
 if ($Action -eq "uninstall") {
     Write-Host "Uninstalling claude-lifeline..."
-    if (Test-Path "$InstallDir\$BinName") {
-        Remove-Item "$InstallDir\$BinName" -Force
-        Write-Host "Removed $InstallDir\$BinName"
-    }
     if (Test-Path $Settings) {
         $json = Get-Content $Settings -Raw | ConvertFrom-Json
         if ($json.statusLine) {
-            Copy-Item $Settings "$Settings.bak"
+            $backup = New-SettingsBackup
             $json.PSObject.Properties.Remove("statusLine")
             $json | ConvertTo-Json -Depth 10 | Set-Content $Settings -Encoding UTF8
-            Write-Host "Removed statusLine from settings.json (backup: settings.json.bak)"
+            Remove-OldSettingsBackups
+            Write-Host "Removed statusLine from settings.json (backup: $(Split-Path $backup -Leaf))"
         }
+    }
+    if (Test-Path "$InstallDir\$BinName") {
+        Remove-Item "$InstallDir\$BinName" -Force
+        Write-Host "Removed $InstallDir\$BinName"
     }
     Write-Host "Done! Restart Claude Code to apply."
     exit 0

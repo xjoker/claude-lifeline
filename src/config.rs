@@ -231,9 +231,38 @@ pub fn write_config(config: &Config) -> anyhow::Result<()> {
 /// Convenience wrapper: load current config, swap display, write back.
 /// Keeps the user's thresholds intact even when the TUI only edits toggles.
 pub fn write_display(display: &DisplayConfig) -> anyhow::Result<()> {
-    let mut current = read_config();
-    current.display = *display;
-    write_config(&current)
+    let path = crate::data::paths::config_path();
+    if !path.exists() {
+        let config = Config { display: *display, ..Config::default() };
+        return write_config(&config);
+    }
+    let metadata = std::fs::metadata(&path)?;
+    anyhow::ensure!(metadata.len() <= 128 * 1024, "config exceeds 128 KiB limit");
+    let source = std::fs::read_to_string(&path)?;
+    let body = update_display_toml(&source, display)?;
+    let tmp = path.with_extension("toml.tmp");
+    std::fs::write(&tmp, body)?;
+    std::fs::rename(&tmp, &path)?;
+    Ok(())
+}
+
+fn update_display_toml(source: &str, display: &DisplayConfig) -> anyhow::Result<String> {
+    // 同时验证结构类型，避免合法 TOML 中的错误字段类型被 TUI 静默覆盖。
+    toml::from_str::<Config>(source)?;
+    let mut doc = source.parse::<toml_edit::DocumentMut>()?;
+    for (key, value) in [
+        ("context", display.context),
+        ("five_hour", display.five_hour),
+        ("seven_day", display.seven_day),
+        ("edit_stats", display.edit_stats),
+        ("subscription", display.subscription),
+        ("seven_day_opus", display.seven_day_opus),
+        ("extra_usage", display.extra_usage),
+        ("session_cost", display.session_cost),
+    ] {
+        doc["display"][key] = toml_edit::value(value);
+    }
+    Ok(doc.to_string())
 }
 
 fn render_config_toml(config: &Config) -> String {
@@ -298,5 +327,27 @@ pub mod cli {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn display_update_rejects_malformed_toml() {
+        assert!(update_display_toml("[display\ncontext = true", &DisplayConfig::default()).is_err());
+    }
+
+    #[test]
+    fn display_update_preserves_comments_and_unknown_content() {
+        let source = "# keep me\n[display]\ncontext = true\nfuture_toggle = \"value\" # inline\n\n[plugin]\nmode = \"custom\"\n";
+        let display = DisplayConfig { context: false, ..DisplayConfig::default() };
+        let updated = update_display_toml(source, &display).unwrap();
+
+        assert!(updated.contains("# keep me"));
+        assert!(updated.contains("future_toggle = \"value\" # inline"));
+        assert!(updated.contains("[plugin]\nmode = \"custom\""));
+        assert!(updated.contains("context = false"));
     }
 }

@@ -329,6 +329,30 @@ fn make_executable(_path: &std::path::Path) -> anyhow::Result<()> {
 
 /// Atomic-ish swap. On Unix `rename` over a running binary works; on Windows
 /// we have to rename the current binary aside first.
+#[cfg(any(windows, test))]
+fn replace_with_backup<F>(
+    downloaded: &std::path::Path,
+    target: &std::path::Path,
+    backup: &std::path::Path,
+    mut rename: F,
+) -> anyhow::Result<()>
+where
+    F: FnMut(&std::path::Path, &std::path::Path) -> anyhow::Result<()>,
+{
+    rename(target, backup)?;
+    if let Err(install_error) = rename(downloaded, target) {
+        return match rename(backup, target) {
+            Ok(()) => Err(anyhow::anyhow!(
+                "failed to install new binary; restored previous binary: {install_error}"
+            )),
+            Err(rollback_error) => Err(anyhow::anyhow!(
+                "failed to install new binary ({install_error}); rollback also failed ({rollback_error})"
+            )),
+        };
+    }
+    Ok(())
+}
+
 fn install_binary(downloaded: &std::path::Path, target: &std::path::Path) -> anyhow::Result<()> {
     #[cfg(unix)]
     {
@@ -340,9 +364,9 @@ fn install_binary(downloaded: &std::path::Path, target: &std::path::Path) -> any
         let backup = target.with_extension("old");
         // Best-effort: ignore failure to remove a stale backup
         let _ = std::fs::remove_file(&backup);
-        std::fs::rename(target, &backup)?;
-        std::fs::rename(downloaded, target)?;
-        Ok(())
+        replace_with_backup(downloaded, target, &backup, |from, to| {
+            std::fs::rename(from, to).map_err(Into::into)
+        })
     }
 }
 
@@ -384,6 +408,49 @@ async fn verify_download(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn replace_with_backup_rolls_back_when_install_rename_fails() {
+        let downloaded = std::path::Path::new("downloaded");
+        let target = std::path::Path::new("target");
+        let backup = std::path::Path::new("backup");
+        let mut calls = Vec::new();
+        let error = replace_with_backup(downloaded, target, backup, |from, to| {
+            calls.push((from.to_owned(), to.to_owned()));
+            if calls.len() == 2 { anyhow::bail!("install rename failed") }
+            Ok(())
+        })
+        .unwrap_err();
+
+        assert_eq!(calls, vec![
+            (target.to_owned(), backup.to_owned()),
+            (downloaded.to_owned(), target.to_owned()),
+            (backup.to_owned(), target.to_owned()),
+        ]);
+        assert!(error.to_string().contains("install rename failed"));
+    }
+
+    #[test]
+    fn replace_with_backup_reports_install_and_rollback_failures() {
+        let mut call = 0;
+        let error = replace_with_backup(
+            std::path::Path::new("downloaded"),
+            std::path::Path::new("target"),
+            std::path::Path::new("backup"),
+            |_, _| {
+                call += 1;
+                match call {
+                    2 => anyhow::bail!("install rename failed"),
+                    3 => anyhow::bail!("rollback failed"),
+                    _ => Ok(()),
+                }
+            },
+        )
+        .unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("install rename failed"));
+        assert!(message.contains("rollback failed"));
+    }
 
     #[test]
     fn lookup_checksum_matches_exact_filename() {
